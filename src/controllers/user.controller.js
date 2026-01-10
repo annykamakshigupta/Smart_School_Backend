@@ -62,3 +62,53 @@ export const login = async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+export const getUsersByRole = async (req, res) => {
+  try {
+    const { role } = req.query;
+
+    const query = {};
+    if (role) {
+      query.role = role;
+    }
+
+    const users = await User.find(query).select("_id name email role phone");
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching users",
+      error: error.message,
+    });
+  }
+};
+
+export const getCurrentUser = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    const user = req.user;
+
+    return res.status(200).json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to get current user",
+      error: error.message,
+    });
+  }
+};

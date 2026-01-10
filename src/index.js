@@ -3,6 +3,9 @@ import express from "express";
 import cors from "cors";
 import connectDB from "./config/db.js";
 import userRoutes from "./routes/user.routes.js";
+import scheduleRoutes from "./routes/schedule.routes.js";
+import classRoutes from "./routes/class.routes.js";
+import subjectRoutes from "./routes/subject.routes.js";
 
 dotenv.config();
 
@@ -22,6 +25,10 @@ app.use(express.json());
 
 // Routes
 app.use("/api/auth", userRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/schedules", scheduleRoutes);
+app.use("/api/classes", classRoutes);
+app.use("/api/subjects", subjectRoutes);
 
 const PORT = 8080;
 
