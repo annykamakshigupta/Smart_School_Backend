@@ -30,7 +30,7 @@ app.use("/api/schedules", scheduleRoutes);
 app.use("/api/classes", classRoutes);
 app.use("/api/subjects", subjectRoutes);
 
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 
 // Connect to DB and start server
 connectDB()
