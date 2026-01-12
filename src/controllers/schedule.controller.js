@@ -5,7 +5,7 @@ import scheduleService from "../services/schedule.service.js";
  * @route POST /api/schedules
  * @access Admin only
  */
-export const createSchedule = async (req, res) => {
+export const createSchedule = async (req, res, next) => {
   try {
     const schedule = await scheduleService.createSchedule(req.body);
 
@@ -35,7 +35,7 @@ export const createSchedule = async (req, res) => {
  * @route GET /api/schedules
  * @access All authenticated users (filtered by role)
  */
-export const getSchedules = async (req, res) => {
+export const getSchedules = async (req, res, next) => {
   try {
     const filters = {};
     const userRole = req.user.role;
@@ -81,7 +81,7 @@ export const getSchedules = async (req, res) => {
  * @route GET /api/schedules/:id
  * @access All authenticated users
  */
-export const getScheduleById = async (req, res) => {
+export const getScheduleById = async (req, res, next) => {
   try {
     const schedule = await scheduleService.getScheduleById(req.params.id);
 
@@ -135,7 +135,7 @@ export const updateSchedule = async (req, res) => {
  * @route DELETE /api/schedules/:id
  * @access Admin only
  */
-export const deleteSchedule = async (req, res) => {
+export const deleteSchedule = async (req, res, next) => {
   try {
     const result = await scheduleService.deleteSchedule(req.params.id);
 
