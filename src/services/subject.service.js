@@ -6,7 +6,12 @@ class SubjectService {
   // Create a new subject
   async createSubject(subjectData) {
     try {
-      // Check if subject code already exists
+      // Normalize subject code
+      if (subjectData.code) {
+        subjectData.code = subjectData.code.trim().toUpperCase();
+      }
+
+      // Check if subject code already exists (check both active and inactive)
       const existingSubject = await Subject.findOne({ code: subjectData.code });
       if (existingSubject) {
         throw new Error("Subject with this code already exists");
@@ -48,7 +53,15 @@ class SubjectService {
   // Get all subjects
   async getAllSubjects(filters = {}) {
     try {
-      const query = { isActive: true };
+      const query = {};
+
+      // Only filter by isActive if explicitly provided, otherwise return all
+      if (filters.isActive !== undefined) {
+        query.isActive = filters.isActive;
+      } else {
+        // Default: show only active subjects
+        query.isActive = true;
+      }
 
       if (filters.academicYear) {
         query.academicYear = filters.academicYear;
@@ -62,10 +75,19 @@ class SubjectService {
         query.assignedTeacher = filters.teacherId;
       }
 
+      // If showAll flag is passed, remove the isActive filter to get all subjects
+      if (filters.showAll === true || filters.showAll === "true") {
+        delete query.isActive;
+      }
+
+      console.log("🔍 Subject Query:", JSON.stringify(query));
+
       const subjects = await Subject.find(query)
         .populate("assignedTeacher", "fullName email")
         .populate("classId", "name section")
         .sort({ name: 1 });
+
+      console.log(`✅ Found ${subjects.length} subjects`);
 
       return subjects;
     } catch (error) {
@@ -109,8 +131,10 @@ class SubjectService {
         }
       }
 
-      // Check for duplicate code if being updated
+      // Normalize and check for duplicate code if being updated
       if (updateData.code) {
+        updateData.code = updateData.code.trim().toUpperCase();
+
         const duplicate = await Subject.findOne({
           code: updateData.code,
           _id: { $ne: subjectId },

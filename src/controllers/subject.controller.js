@@ -25,15 +25,21 @@ class SubjectController {
         academicYear: req.query.academicYear,
         classId: req.query.classId,
         teacherId: req.query.teacherId,
+        showAll: req.query.showAll, // Add ability to fetch all (including inactive)
+        isActive: req.query.isActive,
       };
 
       const subjects = await subjectService.getAllSubjects(filters);
+
+      console.log(`📤 Sending ${subjects.length} subjects to frontend`);
+
       res.status(200).json({
         success: true,
         count: subjects.length,
         data: subjects,
       });
     } catch (error) {
+      console.error("❌ Error in getAllSubjects controller:", error);
       res.status(400).json({
         success: false,
         message: error.message,
