@@ -8,11 +8,11 @@ const router = express.Router();
 router.use(authenticate);
 
 // Admin only routes
-router.post("/", authorize(["admin"]), scheduleController.createSchedule);
+router.post("/", authorize("admin"), scheduleController.createSchedule);
 
-router.put("/:id", authorize(["admin"]), scheduleController.updateSchedule);
+router.put("/:id", authorize("admin"), scheduleController.updateSchedule);
 
-router.delete("/:id", authorize(["admin"]), scheduleController.deleteSchedule);
+router.delete("/:id", authorize("admin"), scheduleController.deleteSchedule);
 
 // Routes accessible to all authenticated users
 router.get("/", scheduleController.getSchedules);
