@@ -4,14 +4,15 @@ import Subject from "../models/subject.model.js";
 const debugSubjects = async () => {
   try {
     // Connect to MongoDB
-    const mongoUri = process.env.MONGODB_URI || "mongodb://localhost:27017/ssms";
+    const mongoUri =
+      process.env.MONGODB_URI || "mongodb://localhost:27017/ssms";
     await mongoose.connect(mongoUri);
     console.log("✅ Connected to MongoDB");
 
     // Get ALL subjects without any filters
     const allSubjects = await Subject.find({});
     console.log("\n📊 TOTAL SUBJECTS IN DATABASE:", allSubjects.length);
-    console.log("=" .repeat(80));
+    console.log("=".repeat(80));
 
     allSubjects.forEach((subject, index) => {
       console.log(`\n📌 Subject ${index + 1}:`);
@@ -21,7 +22,9 @@ const debugSubjects = async () => {
       console.log(`   Academic Year: ${subject.academicYear}`);
       console.log(`   isActive: ${subject.isActive}`);
       console.log(`   Class ID: ${subject.classId || "Not assigned"}`);
-      console.log(`   Teacher ID: ${subject.assignedTeacher || "Not assigned"}`);
+      console.log(
+        `   Teacher ID: ${subject.assignedTeacher || "Not assigned"}`
+      );
       console.log(`   Created: ${subject.createdAt}`);
       console.log(`   Updated: ${subject.updatedAt}`);
     });
@@ -35,7 +38,9 @@ const debugSubjects = async () => {
     console.log("🔴 INACTIVE SUBJECTS:", inactiveSubjects.length);
 
     // Check for subjects without isActive field
-    const noIsActiveField = await Subject.find({ isActive: { $exists: false } });
+    const noIsActiveField = await Subject.find({
+      isActive: { $exists: false },
+    });
     console.log("⚠️  SUBJECTS WITHOUT isActive FIELD:", noIsActiveField.length);
 
     // Check for duplicate codes
