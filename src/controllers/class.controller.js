@@ -79,12 +79,15 @@ class ClassController {
   // Delete class
   async deleteClass(req, res) {
     try {
-      await classService.deleteClass(req.params.id);
+      
+      const result = await classService.deleteClass(req.params.id);
       res.status(200).json({
         success: true,
-        message: "Class deleted successfully",
+        message: "Class deleted successfully (soft delete)",
+        data: result,
       });
     } catch (error) {
+     
       res.status(400).json({
         success: false,
         message: error.message,

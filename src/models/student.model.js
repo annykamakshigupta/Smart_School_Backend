@@ -6,7 +6,7 @@ const studentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
+      // unique: true, // Removed to avoid duplicate index warning
     },
     classId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -52,7 +52,7 @@ studentSchema.index(
 
 // Index for faster queries
 studentSchema.index({ parentId: 1 });
-studentSchema.index({ userId: 1 });
+studentSchema.index({ userId: 1 }, { unique: true });
 
 const Student = mongoose.model("Student", studentSchema);
 

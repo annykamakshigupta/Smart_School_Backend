@@ -6,7 +6,7 @@ const parentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
+      // unique: true, // Removed to avoid duplicate index warning
     },
     children: [
       {
@@ -29,7 +29,7 @@ const parentSchema = new mongoose.Schema(
 );
 
 // Index for faster queries
-parentSchema.index({ userId: 1 });
+parentSchema.index({ userId: 1 }, { unique: true });
 
 const Parent = mongoose.model("Parent", parentSchema);
 

@@ -31,7 +31,7 @@ class SubjectController {
 
       const subjects = await subjectService.getAllSubjects(filters);
 
-      console.log(`📤 Sending ${subjects.length} subjects to frontend`);
+   
 
       res.status(200).json({
         success: true,
@@ -86,12 +86,16 @@ class SubjectController {
   // Delete subject
   async deleteSubject(req, res) {
     try {
-      await subjectService.deleteSubject(req.params.id);
+   
+      const result = await subjectService.deleteSubject(req.params.id);
+      
       res.status(200).json({
         success: true,
-        message: "Subject deleted successfully",
+        message: "Subject deleted successfully (soft delete)",
+        data: result,
       });
     } catch (error) {
+      console.error(`📤 DELETE Subject Error: ${error.message}`);
       res.status(400).json({
         success: false,
         message: error.message,

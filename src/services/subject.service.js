@@ -80,14 +80,18 @@ class SubjectService {
         delete query.isActive;
       }
 
-      console.log("🔍 Subject Query:", JSON.stringify(query));
+      // ...existing code...
 
       const subjects = await Subject.find(query)
         .populate("assignedTeacher", "fullName email")
         .populate("classId", "name section")
         .sort({ name: 1 });
 
-      console.log(`✅ Found ${subjects.length} subjects`);
+      // ...existing code...
+      // ...existing code...
+        `   🗑️  Deleted subjects (isActive: false) are hidden by default`
+      );
+      // ...existing code...
 
       return subjects;
     } catch (error) {
@@ -190,11 +194,15 @@ class SubjectService {
         throw new Error("Subject not found");
       }
 
+      // ...existing code...
+      // ...existing code...
+
       // Remove subject from class
       if (subject.classId) {
         await Class.findByIdAndUpdate(subject.classId, {
           $pull: { subjects: subjectId },
         });
+        // ...existing code...
       }
 
       const deletedSubject = await Subject.findByIdAndUpdate(
@@ -203,8 +211,12 @@ class SubjectService {
         { new: true }
       );
 
+      // ...existing code...
+      // ...existing code...
+
       return deletedSubject;
     } catch (error) {
+      console.error(`❌ Error deleting subject: ${error.message}`);
       throw error;
     }
   }

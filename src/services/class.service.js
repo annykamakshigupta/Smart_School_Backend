@@ -129,6 +129,17 @@ class ClassService {
   // Delete class (soft delete)
   async deleteClass(classId) {
     try {
+      const classToDelete = await Class.findById(classId);
+      if (!classToDelete) {
+        throw new Error("Class not found");
+      }
+
+      // ...existing code...
+        `🗑️  Deleting class: ${classToDelete.name} - ${classToDelete.section}`
+      );
+      // ...existing code...
+      // ...existing code...
+
       const deletedClass = await Class.findByIdAndUpdate(
         classId,
         { isActive: false },
@@ -139,8 +150,12 @@ class ClassService {
         throw new Error("Class not found");
       }
 
+      // ...existing code...
+      // ...existing code...
+
       return deletedClass;
     } catch (error) {
+      console.error(`❌ Error deleting class: ${error.message}`);
       throw error;
     }
   }
