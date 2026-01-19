@@ -14,7 +14,7 @@ class ClassService {
 
       if (existingClass) {
         throw new Error(
-          "Class with this name, section, and academic year already exists"
+          "Class with this name, section, and academic year already exists",
         );
       }
 
@@ -29,7 +29,7 @@ class ClassService {
       const newClass = await Class.create(classData);
       return await Class.findById(newClass._id).populate(
         "classTeacher",
-        "fullName email"
+        "fullName email",
       );
     } catch (error) {
       throw error;
@@ -104,7 +104,7 @@ class ClassService {
 
         if (duplicate) {
           throw new Error(
-            "Another class with this name, section, and academic year already exists"
+            "Another class with this name, section, and academic year already exists",
           );
         }
       }
@@ -135,15 +135,15 @@ class ClassService {
       }
 
       // ...existing code...
-        `🗑️  Deleting class: ${classToDelete.name} - ${classToDelete.section}`
-      );
+      `🗑️  Deleting class: ${classToDelete.name} - ${classToDelete.section}`;
+
       // ...existing code...
       // ...existing code...
 
       const deletedClass = await Class.findByIdAndUpdate(
         classId,
         { isActive: false },
-        { new: true }
+        { new: true },
       );
 
       if (!deletedClass) {
@@ -166,7 +166,7 @@ class ClassService {
       const updatedClass = await Class.findByIdAndUpdate(
         classId,
         { $addToSet: { subjects: { $each: subjectIds } } },
-        { new: true }
+        { new: true },
       ).populate("subjects", "name code");
 
       if (!updatedClass) {
@@ -185,7 +185,7 @@ class ClassService {
       const updatedClass = await Class.findByIdAndUpdate(
         classId,
         { $pull: { subjects: subjectId } },
-        { new: true }
+        { new: true },
       ).populate("subjects", "name code");
 
       if (!updatedClass) {

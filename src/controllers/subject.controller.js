@@ -39,7 +39,6 @@ class SubjectController {
         data: subjects,
       });
     } catch (error) {
-      console.error("❌ Error in getAllSubjects controller:", error);
       res.status(400).json({
         success: false,
         message: error.message,
@@ -95,7 +94,6 @@ class SubjectController {
         data: result,
       });
     } catch (error) {
-      console.error(`📤 DELETE Subject Error: ${error.message}`);
       res.status(400).json({
         success: false,
         message: error.message,

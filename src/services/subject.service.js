@@ -89,8 +89,8 @@ class SubjectService {
 
       // ...existing code...
       // ...existing code...
-        `   🗑️  Deleted subjects (isActive: false) are hidden by default`
-      );
+      `   🗑️  Deleted subjects (isActive: false) are hidden by default`;
+
       // ...existing code...
 
       return subjects;
@@ -175,7 +175,7 @@ class SubjectService {
       const updatedSubject = await Subject.findByIdAndUpdate(
         subjectId,
         updateData,
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       )
         .populate("assignedTeacher", "fullName email")
         .populate("classId", "name section");
@@ -186,40 +186,31 @@ class SubjectService {
     }
   }
 
-  // Delete subject (soft delete)
-  async deleteSubject(subjectId) {
-    try {
-      const subject = await Subject.findById(subjectId);
-      if (!subject) {
-        throw new Error("Subject not found");
-      }
-
-      // ...existing code...
-      // ...existing code...
-
-      // Remove subject from class
-      if (subject.classId) {
-        await Class.findByIdAndUpdate(subject.classId, {
-          $pull: { subjects: subjectId },
-        });
-        // ...existing code...
-      }
-
-      const deletedSubject = await Subject.findByIdAndUpdate(
-        subjectId,
-        { isActive: false },
-        { new: true }
-      );
-
-      // ...existing code...
-      // ...existing code...
-
-      return deletedSubject;
-    } catch (error) {
-      console.error(`❌ Error deleting subject: ${error.message}`);
-      throw error;
+  // Delete subject 
+ // Delete subject (HARD delete)
+async deleteSubject(subjectId) {
+  try {
+    const subject = await Subject.findById(subjectId);
+    if (!subject) {
+      throw new Error("Subject not found");
     }
+
+    // Remove subject from class
+    if (subject.classId) {
+      await Class.findByIdAndUpdate(subject.classId, {
+        $pull: { subjects: subjectId },
+      });
+    }
+
+    // 🔥 Permanently delete
+    await Subject.findByIdAndDelete(subjectId);
+
+    return { message: "Subject permanently deleted" };
+  } catch (error) {
+    console.error(`❌ Error deleting subject: ${error.message}`);
+    throw error;
   }
+}
 
   // Assign teacher to subject
   async assignTeacher(subjectId, teacherId) {
@@ -233,7 +224,7 @@ class SubjectService {
       const updatedSubject = await Subject.findByIdAndUpdate(
         subjectId,
         { assignedTeacher: teacherId },
-        { new: true }
+        { new: true },
       ).populate("assignedTeacher", "fullName email");
 
       if (!updatedSubject) {

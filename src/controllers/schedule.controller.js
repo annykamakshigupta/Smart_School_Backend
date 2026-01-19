@@ -5,7 +5,7 @@ import scheduleService from "../services/schedule.service.js";
  * @route POST /api/schedules
  * @access Admin only
  */
-export const createSchedule = async (req, res, next) => {
+export const createSchedule = async (req, res) => {
   try {
     const schedule = await scheduleService.createSchedule(req.body);
 
@@ -35,7 +35,7 @@ export const createSchedule = async (req, res, next) => {
  * @route GET /api/schedules
  * @access All authenticated users (filtered by role)
  */
-export const getSchedules = async (req, res, next) => {
+export const getSchedules = async (req, res) => {
   try {
     const filters = {};
     const userRole = req.user.role;
@@ -81,7 +81,7 @@ export const getSchedules = async (req, res, next) => {
  * @route GET /api/schedules/:id
  * @access All authenticated users
  */
-export const getScheduleById = async (req, res, next) => {
+export const getScheduleById = async (req, res) => {
   try {
     const schedule = await scheduleService.getScheduleById(req.params.id);
 
@@ -106,7 +106,7 @@ export const updateSchedule = async (req, res) => {
   try {
     const schedule = await scheduleService.updateSchedule(
       req.params.id,
-      req.body
+      req.body,
     );
 
     res.status(200).json({
@@ -135,7 +135,7 @@ export const updateSchedule = async (req, res) => {
  * @route DELETE /api/schedules/:id
  * @access Admin only
  */
-export const deleteSchedule = async (req, res, next) => {
+export const deleteSchedule = async (req, res) => {
   try {
     const result = await scheduleService.deleteSchedule(req.params.id);
 
@@ -166,7 +166,7 @@ export const getWeeklyScheduleForClass = async (req, res) => {
     const weeklySchedule = await scheduleService.getWeeklyScheduleForClass(
       classId,
       section,
-      academicYear
+      academicYear,
     );
 
     res.status(200).json({
@@ -203,7 +203,7 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
 
     const weeklySchedule = await scheduleService.getWeeklyScheduleForTeacher(
       teacherId,
-      academicYear
+      academicYear,
     );
 
     res.status(200).json({

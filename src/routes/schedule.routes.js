@@ -22,14 +22,14 @@ router.get("/:id", scheduleController.getScheduleById);
 // Get weekly schedule for a class
 router.get(
   "/class/:classId/section/:section",
-  scheduleController.getWeeklyScheduleForClass
+  scheduleController.getWeeklyScheduleForClass,
 );
 
 // Get weekly schedule for a teacher
 router.get(
   "/teacher/:teacherId",
   authorize(["admin", "teacher"]),
-  scheduleController.getWeeklyScheduleForTeacher
+  scheduleController.getWeeklyScheduleForTeacher,
 );
 
 export default router;
