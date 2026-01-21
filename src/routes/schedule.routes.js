@@ -7,17 +7,14 @@ const router = express.Router();
 // All routes require authentication
 router.use(authenticate);
 
-// Admin only routes
-router.post("/", authorize("admin"), scheduleController.createSchedule);
+// Specific routes MUST come before parameterized routes like /:id
 
-router.put("/:id", authorize("admin"), scheduleController.updateSchedule);
-
-router.delete("/:id", authorize("admin"), scheduleController.deleteSchedule);
-
-// Routes accessible to all authenticated users
-router.get("/", scheduleController.getSchedules);
-
-router.get("/:id", scheduleController.getScheduleById);
+// Teacher-specific route for authenticated teacher's own schedule
+router.get(
+  "/my-schedule",
+  authorize("teacher"),
+  scheduleController.getTeacherSchedule,
+);
 
 // Get weekly schedule for a class
 router.get(
@@ -31,5 +28,18 @@ router.get(
   authorize(["admin", "teacher"]),
   scheduleController.getWeeklyScheduleForTeacher,
 );
+
+// Admin only routes
+router.post("/", authorize("admin"), scheduleController.createSchedule);
+
+router.put("/:id", authorize("admin"), scheduleController.updateSchedule);
+
+router.delete("/:id", authorize("admin"), scheduleController.deleteSchedule);
+
+// Routes accessible to all authenticated users
+router.get("/", scheduleController.getSchedules);
+
+// This MUST come last - it will match any /schedules/:id
+router.get("/:id", scheduleController.getScheduleById);
 
 export default router;

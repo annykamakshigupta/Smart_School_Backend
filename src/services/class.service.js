@@ -29,7 +29,7 @@ class ClassService {
       const newClass = await Class.create(classData);
       return await Class.findById(newClass._id).populate(
         "classTeacher",
-        "fullName email",
+        "name email",
       );
     } catch (error) {
       throw error;
@@ -50,7 +50,7 @@ class ClassService {
       }
 
       const classes = await Class.find(query)
-        .populate("classTeacher", "fullName email")
+        .populate("classTeacher", "name email")
         .populate("subjects", "name code")
         .sort({ name: 1, section: 1 });
 
@@ -64,7 +64,7 @@ class ClassService {
   async getClassById(classId) {
     try {
       const classData = await Class.findById(classId)
-        .populate("classTeacher", "fullName email")
+        .populate("classTeacher", "name email")
         .populate("subjects", "name code assignedTeacher");
 
       if (!classData) {
@@ -113,7 +113,7 @@ class ClassService {
         new: true,
         runValidators: true,
       })
-        .populate("classTeacher", "fullName email")
+        .populate("classTeacher", "name email")
         .populate("subjects", "name code");
 
       if (!updatedClass) {

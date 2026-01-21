@@ -1,4 +1,5 @@
 import Schedule from "../models/schedule.model.js";
+import Subject from "../models/subject.model.js";
 
 class ScheduleService {
   /**
@@ -111,6 +112,24 @@ class ScheduleService {
    * Create a new schedule
    */
   async createSchedule(scheduleData) {
+    // Auto-assign teacher from subject if not provided
+    if (!scheduleData.teacherId && scheduleData.subjectId) {
+      const subject = await Subject.findById(scheduleData.subjectId);
+      if (!subject) {
+        const error = new Error("Subject not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      if (!subject.assignedTeacher) {
+        const error = new Error(
+          "Subject has no assigned teacher. Please assign a teacher to this subject first.",
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+      scheduleData.teacherId = subject.assignedTeacher;
+    }
+
     // Check for conflicts
     const conflictCheck = await this.checkConflicts(scheduleData);
 
@@ -141,13 +160,18 @@ class ScheduleService {
     if (filters.section) query.section = filters.section;
     if (filters.teacherId) query.teacherId = filters.teacherId;
     if (filters.dayOfWeek) query.dayOfWeek = filters.dayOfWeek;
+    // Only filter by academicYear if explicitly provided
     if (filters.academicYear) query.academicYear = filters.academicYear;
+
+    console.log("🔍 Query filters:", JSON.stringify(query, null, 2));
 
     const schedules = await Schedule.find(query)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
       .populate("teacherId", "name email")
       .sort({ dayOfWeek: 1, startTime: 1 });
+
+    console.log("📊 Query result count:", schedules.length);
 
     return schedules;
   }
@@ -262,7 +286,18 @@ class ScheduleService {
    * Get weekly schedule for a teacher
    */
   async getWeeklyScheduleForTeacher(teacherId, academicYear) {
-    const schedules = await this.getSchedules({ teacherId, academicYear });
+    console.log("🔍 Fetching schedules for teacherId:", teacherId);
+    console.log("🔍 Academic year:", academicYear);
+
+    // Only include academicYear in filters if it's provided
+    const filters = { teacherId };
+    if (academicYear) {
+      filters.academicYear = academicYear;
+    }
+
+    const schedules = await this.getSchedules(filters);
+
+    console.log("📊 Found schedules:", schedules.length);
 
     // Organize by day
     const weeklySchedule = {

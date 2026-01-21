@@ -1,4 +1,5 @@
 import scheduleService from "../services/schedule.service.js";
+import mongoose from "mongoose";
 
 /**
  * Create a new schedule entry
@@ -83,6 +84,14 @@ export const getSchedules = async (req, res) => {
  */
 export const getScheduleById = async (req, res) => {
   try {
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid schedule ID format",
+      });
+    }
+
     const schedule = await scheduleService.getScheduleById(req.params.id);
 
     res.status(200).json({
@@ -200,6 +209,37 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
         message: "You can only view your own schedule",
       });
     }
+
+    const weeklySchedule = await scheduleService.getWeeklyScheduleForTeacher(
+      teacherId,
+      academicYear,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: weeklySchedule,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch weekly schedule",
+    });
+  }
+};
+
+/**
+ * Get authenticated teacher's own schedule (no teacherId required)
+ * @route GET /api/teacher/schedule
+ * @access Teachers only
+ */
+export const getTeacherSchedule = async (req, res) => {
+  try {
+    console.log("✅ getTeacherSchedule called for teacher:", req.user._id);
+    const teacherId = req.user._id;
+
+    // Only use academicYear if explicitly provided in query params
+    // Otherwise, fetch schedules for all academic years
+    const academicYear = req.query.academicYear || null;
 
     const weeklySchedule = await scheduleService.getWeeklyScheduleForTeacher(
       teacherId,
