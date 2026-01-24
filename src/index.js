@@ -8,6 +8,7 @@ import classRoutes from "./routes/class.routes.js";
 import subjectRoutes from "./routes/subject.routes.js";
 import attendanceRoutes from "./routes/attendance.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import assignmentRoutes from "./routes/assignment.routes.js";
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.use("/api/classes", classRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/assignments", assignmentRoutes);
 
 const PORT = process.env.PORT || 8080;
 
