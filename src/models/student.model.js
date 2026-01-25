@@ -11,17 +11,18 @@ const studentSchema = new mongoose.Schema(
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
-      required: true,
+      required: false,
+      default: null,
     },
     section: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
       uppercase: true,
     },
     rollNumber: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     parentId: {
@@ -35,19 +36,26 @@ const studentSchema = new mongoose.Schema(
     },
     academicYear: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
+      default: () => new Date().getFullYear().toString(),
     },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Unique constraint: rollNumber unique per class per academic year
+// Unique constraint: rollNumber unique per class per academic year (only when all exist)
 studentSchema.index(
   { classId: 1, rollNumber: 1, academicYear: 1 },
-  { unique: true }
+  {
+    unique: true,
+    partialFilterExpression: {
+      classId: { $exists: true, $ne: null },
+      rollNumber: { $exists: true, $ne: null },
+    },
+  },
 );
 
 // Index for faster queries

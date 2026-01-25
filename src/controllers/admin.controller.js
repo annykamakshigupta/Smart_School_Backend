@@ -478,67 +478,37 @@ class AdminController {
    */
   async getAllStudents(req, res) {
     try {
-      const { classId, section, academicYear, search } = req.query;
+      const { search } = req.query;
 
-      // If Student collection is empty, fetch from User model
-      const studentCount = await Student.countDocuments();
+      // Fetch users with student role - ONLY from User model
+      let studentUsers = await User.find({
+        role: "student",
+        status: "active",
+      }).populate("parentId", "name email phone");
 
-      if (studentCount === 0) {
-        // Fetch users with student role
-        let studentUsers = await User.find({
-          role: "student",
-          status: "active",
-        });
-
-        // Apply search filter
-        if (search) {
-          studentUsers = studentUsers.filter((s) =>
-            s.name?.toLowerCase().includes(search.toLowerCase()),
-          );
-        }
-
-        // Build minimal student objects
-        const students = studentUsers.map((user) => ({
-          _id: user._id,
-          userId: {
-            _id: user._id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone,
-            status: user.status,
-          },
-          classId: null,
-          section: null,
-          rollNumber: null,
-          parentId: null,
-          academicYear: null,
-        }));
-
-        return res.status(200).json({
-          success: true,
-          count: students.length,
-          data: students,
-        });
-      }
-
-      // Normal flow when Student documents exist
-      const query = {};
-      if (classId) query.classId = classId;
-      if (section) query.section = section;
-      if (academicYear) query.academicYear = academicYear;
-
-      let students = await Student.find(query)
-        .populate("userId", "name email phone status")
-        .populate("classId", "name section")
-        .populate("parentId", "name email phone")
-        .sort({ rollNumber: 1 });
-
-      // Apply search filter on populated user name
+      // Apply search filter
       if (search) {
-        students = students.filter((s) =>
-          s.userId?.name?.toLowerCase().includes(search.toLowerCase()),
+        studentUsers = studentUsers.filter((s) =>
+          s.name?.toLowerCase().includes(search.toLowerCase()),
         );
       }
+
+      // Build student objects
+      const students = studentUsers.map((user) => ({
+        _id: user._id,
+        userId: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          status: user.status,
+        },
+        classId: null,
+        section: null,
+        rollNumber: null,
+        parentId: user.parentId || null,
+        academicYear: null,
+      }));
 
       res.status(200).json({
         success: true,
@@ -803,13 +773,14 @@ class AdminController {
    */
   async getAllParents(req, res) {
     try {
-      // Fetch all users with parent role
+      // Fetch all users with parent role - ONLY from User model
       const parentUsers = await User.find({ role: "parent", status: "active" });
 
-      // Fetch all students to find parent-child relationships
-      const allStudents = await Student.find()
-        .populate("userId", "name email")
-        .populate("classId", "name section");
+      // Fetch all student users - ONLY from User model
+      const allStudents = await User.find({
+        role: "student",
+        status: "active",
+      });
 
       // Build parent objects with their children
       const parents = parentUsers.map((parentUser) => {
@@ -821,7 +792,7 @@ class AdminController {
         );
 
         return {
-          _id: parentUser._id, // Use user ID as parent ID
+          _id: parentUser._id,
           userId: {
             _id: parentUser._id,
             name: parentUser.name,
@@ -829,7 +800,17 @@ class AdminController {
             phone: parentUser.phone,
             status: parentUser.status,
           },
-          children: children,
+          children: children.map((child) => ({
+            _id: child._id,
+            userId: {
+              _id: child._id,
+              name: child.name,
+              email: child.email,
+            },
+            classId: null,
+            section: null,
+            rollNumber: null,
+          })),
         };
       });
 
@@ -872,36 +853,9 @@ class AdminController {
         });
       }
 
-      // Find or create Parent document
-      let parent = await Parent.findOne({ userId: parentId });
-      if (!parent) {
-        parent = new Parent({ userId: parentId, children: [] });
-        await parent.save();
-      }
-
-      // Find or create Student document (if studentId is actually a userId)
-      let student = await Student.findOne({ userId: studentId });
-      if (!student) {
-        // Create a minimal student record
-        student = new Student({
-          userId: studentId,
-          classId: null,
-          section: "N/A",
-          rollNumber: "TEMP",
-          academicYear: new Date().getFullYear().toString(),
-        });
-        await student.save();
-      }
-
-      // Update student's parentId
-      student.parentId = parentId;
-      await student.save();
-
-      // Add to parent's children
-      await Parent.findOneAndUpdate(
-        { userId: parentId },
-        { $addToSet: { children: student._id } },
-      );
+      // Update student's parentId in User model
+      studentUser.parentId = parentId;
+      await studentUser.save();
 
       res.status(200).json({
         success: true,
@@ -923,18 +877,11 @@ class AdminController {
     try {
       const { parentId, studentId } = req.body;
 
-      // Find student document by userId (studentId is actually a User ID)
-      const student = await Student.findOne({ userId: studentId });
-      if (student) {
-        // Update student's parentId to null
-        student.parentId = null;
-        await student.save();
-
-        // Remove from parent's children array
-        await Parent.findOneAndUpdate(
-          { userId: parentId },
-          { $pull: { children: student._id } },
-        );
+      // Find student user and remove parentId
+      const studentUser = await User.findById(studentId);
+      if (studentUser && studentUser.role === "student") {
+        studentUser.parentId = null;
+        await studentUser.save();
       }
 
       res.status(200).json({

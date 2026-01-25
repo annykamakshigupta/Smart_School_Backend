@@ -29,8 +29,14 @@ const userSchema = new mongoose.Schema(
         ref: "Subject",
       },
     ],
+    // For students - parent relationship
+    parentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Index for faster queries
