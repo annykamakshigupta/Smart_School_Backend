@@ -133,7 +133,7 @@ class AdminController {
       }
 
       const users = await User.find({ role, status: "active" }).select(
-        "_id name email phone"
+        "_id name email phone",
       );
 
       res.status(200).json({
@@ -447,7 +447,7 @@ class AdminController {
       if (parentId) {
         await Parent.findOneAndUpdate(
           { userId: parentId },
-          { $addToSet: { children: student._id } }
+          { $addToSet: { children: student._id } },
         );
       }
 
@@ -480,6 +480,48 @@ class AdminController {
     try {
       const { classId, section, academicYear, search } = req.query;
 
+      // If Student collection is empty, fetch from User model
+      const studentCount = await Student.countDocuments();
+
+      if (studentCount === 0) {
+        // Fetch users with student role
+        let studentUsers = await User.find({
+          role: "student",
+          status: "active",
+        });
+
+        // Apply search filter
+        if (search) {
+          studentUsers = studentUsers.filter((s) =>
+            s.name?.toLowerCase().includes(search.toLowerCase()),
+          );
+        }
+
+        // Build minimal student objects
+        const students = studentUsers.map((user) => ({
+          _id: user._id,
+          userId: {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            status: user.status,
+          },
+          classId: null,
+          section: null,
+          rollNumber: null,
+          parentId: null,
+          academicYear: null,
+        }));
+
+        return res.status(200).json({
+          success: true,
+          count: students.length,
+          data: students,
+        });
+      }
+
+      // Normal flow when Student documents exist
       const query = {};
       if (classId) query.classId = classId;
       if (section) query.section = section;
@@ -494,7 +536,7 @@ class AdminController {
       // Apply search filter on populated user name
       if (search) {
         students = students.filter((s) =>
-          s.userId?.name?.toLowerCase().includes(search.toLowerCase())
+          s.userId?.name?.toLowerCase().includes(search.toLowerCase()),
         );
       }
 
@@ -608,14 +650,14 @@ class AdminController {
         if (student.parentId) {
           await Parent.findOneAndUpdate(
             { userId: student.parentId },
-            { $pull: { children: student._id } }
+            { $pull: { children: student._id } },
           );
         }
         // Add to new parent
         if (parentId) {
           await Parent.findOneAndUpdate(
             { userId: parentId },
-            { $addToSet: { children: student._id } }
+            { $addToSet: { children: student._id } },
           );
         }
       }
@@ -675,7 +717,7 @@ class AdminController {
       if (student.parentId) {
         await Parent.findOneAndUpdate(
           { userId: student.parentId },
-          { $pull: { children: student._id } }
+          { $pull: { children: student._id } },
         );
       }
 
@@ -686,7 +728,7 @@ class AdminController {
       // Add student to parent's children
       await Parent.findOneAndUpdate(
         { userId: parentId },
-        { $addToSet: { children: student._id } }
+        { $addToSet: { children: student._id } },
       );
 
       res.status(200).json({
@@ -761,15 +803,35 @@ class AdminController {
    */
   async getAllParents(req, res) {
     try {
-      const parents = await Parent.find()
-        .populate("userId", "name email phone status")
-        .populate({
-          path: "children",
-          populate: [
-            { path: "userId", select: "name email" },
-            { path: "classId", select: "name section" },
-          ],
-        });
+      // Fetch all users with parent role
+      const parentUsers = await User.find({ role: "parent", status: "active" });
+
+      // Fetch all students to find parent-child relationships
+      const allStudents = await Student.find()
+        .populate("userId", "name email")
+        .populate("classId", "name section");
+
+      // Build parent objects with their children
+      const parents = parentUsers.map((parentUser) => {
+        // Find all students where parentId matches this parent's user ID
+        const children = allStudents.filter(
+          (student) =>
+            student.parentId &&
+            student.parentId.toString() === parentUser._id.toString(),
+        );
+
+        return {
+          _id: parentUser._id, // Use user ID as parent ID
+          userId: {
+            _id: parentUser._id,
+            name: parentUser.name,
+            email: parentUser.email,
+            phone: parentUser.phone,
+            status: parentUser.status,
+          },
+          children: children,
+        };
+      });
 
       res.status(200).json({
         success: true,
@@ -792,20 +854,43 @@ class AdminController {
     try {
       const { parentId, studentId } = req.body;
 
-      const parent = await Parent.findOne({ userId: parentId });
-      if (!parent) {
+      // Verify parent user exists
+      const parentUser = await User.findById(parentId);
+      if (!parentUser || parentUser.role !== "parent") {
         return res.status(404).json({
           success: false,
-          message: "Parent not found",
+          message: "Parent user not found",
         });
       }
 
-      const student = await Student.findById(studentId);
-      if (!student) {
+      // Verify student user exists
+      const studentUser = await User.findById(studentId);
+      if (!studentUser || studentUser.role !== "student") {
         return res.status(404).json({
           success: false,
-          message: "Student not found",
+          message: "Student user not found",
         });
+      }
+
+      // Find or create Parent document
+      let parent = await Parent.findOne({ userId: parentId });
+      if (!parent) {
+        parent = new Parent({ userId: parentId, children: [] });
+        await parent.save();
+      }
+
+      // Find or create Student document (if studentId is actually a userId)
+      let student = await Student.findOne({ userId: studentId });
+      if (!student) {
+        // Create a minimal student record
+        student = new Student({
+          userId: studentId,
+          classId: null,
+          section: "N/A",
+          rollNumber: "TEMP",
+          academicYear: new Date().getFullYear().toString(),
+        });
+        await student.save();
       }
 
       // Update student's parentId
@@ -815,7 +900,7 @@ class AdminController {
       // Add to parent's children
       await Parent.findOneAndUpdate(
         { userId: parentId },
-        { $addToSet: { children: studentId } }
+        { $addToSet: { children: student._id } },
       );
 
       res.status(200).json({
@@ -838,14 +923,19 @@ class AdminController {
     try {
       const { parentId, studentId } = req.body;
 
-      // Remove from parent's children
-      await Parent.findOneAndUpdate(
-        { userId: parentId },
-        { $pull: { children: studentId } }
-      );
+      // Find student document by userId (studentId is actually a User ID)
+      const student = await Student.findOne({ userId: studentId });
+      if (student) {
+        // Update student's parentId to null
+        student.parentId = null;
+        await student.save();
 
-      // Update student's parentId
-      await Student.findByIdAndUpdate(studentId, { parentId: null });
+        // Remove from parent's children array
+        await Parent.findOneAndUpdate(
+          { userId: parentId },
+          { $pull: { children: student._id } },
+        );
+      }
 
       res.status(200).json({
         success: true,
@@ -923,22 +1013,104 @@ class AdminController {
         });
       }
 
+      // Remove class from old teacher's assignedClasses if exists
+      if (
+        classDoc.classTeacher &&
+        classDoc.classTeacher.toString() !== teacherId
+      ) {
+        await User.findByIdAndUpdate(classDoc.classTeacher, {
+          $pull: { assignedClasses: classId },
+        });
+      }
+
       classDoc.classTeacher = teacherId;
       await classDoc.save();
 
-      // Add class to teacher's assigned classes
+      // Add class to new teacher's assigned classes
       await User.findByIdAndUpdate(teacherId, {
         $addToSet: { assignedClasses: classId },
       });
 
+      const updatedClass = await Class.findById(classId).populate(
+        "classTeacher",
+        "name email phone",
+      );
+
       res.status(200).json({
         success: true,
         message: "Class teacher assigned successfully",
+        data: updatedClass,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
         message: "Error assigning class teacher",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Remove class teacher
+   */
+  async removeClassTeacher(req, res) {
+    try {
+      const { classId } = req.body;
+
+      const Class = (await import("../models/class.model.js")).default;
+
+      const classDoc = await Class.findById(classId);
+      if (!classDoc) {
+        return res.status(404).json({
+          success: false,
+          message: "Class not found",
+        });
+      }
+
+      // Remove class from teacher's assignedClasses
+      if (classDoc.classTeacher) {
+        await User.findByIdAndUpdate(classDoc.classTeacher, {
+          $pull: { assignedClasses: classId },
+        });
+      }
+
+      classDoc.classTeacher = null;
+      await classDoc.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Class teacher removed successfully",
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error removing class teacher",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get all classes with teacher info (for admin assignment page)
+   */
+  async getAllClassesWithTeachers(req, res) {
+    try {
+      const Class = (await import("../models/class.model.js")).default;
+
+      const classes = await Class.find({ isActive: true })
+        .populate("classTeacher", "name email phone")
+        .populate("subjects", "name code")
+        .sort({ name: 1, section: 1 });
+
+      res.status(200).json({
+        success: true,
+        count: classes.length,
+        data: classes,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching classes",
         error: error.message,
       });
     }
@@ -1035,6 +1207,171 @@ class AdminController {
   }
 
   // ============ DASHBOARD DATA ============
+
+  /**
+   * Get parent dashboard data (for logged-in parent)
+   */
+  async getParentDashboardData(req, res) {
+    try {
+      const { parentId } = req.params;
+
+      const parent = await Parent.findOne({ userId: parentId }).populate({
+        path: "children",
+        populate: [
+          { path: "userId", select: "name email phone status" },
+          {
+            path: "classId",
+            select: "name section academicYear classTeacher subjects",
+            populate: [
+              { path: "classTeacher", select: "name email phone" },
+              { path: "subjects", select: "name code" },
+            ],
+          },
+        ],
+      });
+
+      if (!parent) {
+        return res.status(404).json({
+          success: false,
+          message: "Parent not found",
+        });
+      }
+
+      // Get user info
+      const userInfo = await User.findById(parentId).select(
+        "name email phone status",
+      );
+
+      res.status(200).json({
+        success: true,
+        data: {
+          parent: userInfo,
+          parentProfile: parent,
+          children: parent.children,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching parent dashboard data",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get student dashboard data (for logged-in student)
+   */
+  async getStudentDashboardData(req, res) {
+    try {
+      const { studentId } = req.params;
+
+      const student = await Student.findOne({ userId: studentId })
+        .populate("userId", "name email phone status")
+        .populate({
+          path: "classId",
+          populate: [
+            { path: "classTeacher", select: "name email phone" },
+            { path: "subjects", select: "name code assignedTeacher" },
+          ],
+        })
+        .populate("parentId", "name email phone");
+
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student not found",
+        });
+      }
+
+      // Get parent profile with more details
+      let parentInfo = null;
+      if (student.parentId) {
+        const parentProfile = await Parent.findOne({
+          userId: student.parentId,
+        }).populate("userId", "name email phone");
+        parentInfo = parentProfile;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          student,
+          classInfo: student.classId,
+          classTeacher: student.classId?.classTeacher,
+          parentInfo,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching student dashboard data",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get teacher dashboard data (for logged-in teacher)
+   */
+  async getTeacherDashboardData(req, res) {
+    try {
+      const { teacherId } = req.params;
+      const Class = (await import("../models/class.model.js")).default;
+      const Subject = (await import("../models/subject.model.js")).default;
+
+      const teacher = await User.findById(teacherId)
+        .select("-password")
+        .populate("assignedClasses", "name section academicYear")
+        .populate({
+          path: "assignedSubjects",
+          populate: { path: "classId", select: "name section" },
+        });
+
+      if (!teacher || teacher.role !== "teacher") {
+        return res.status(404).json({
+          success: false,
+          message: "Teacher not found",
+        });
+      }
+
+      // Get classes where this teacher is class teacher
+      const classTeacherOf = await Class.find({
+        classTeacher: teacherId,
+      }).select("name section academicYear");
+
+      // Get student count for assigned classes
+      let totalStudents = 0;
+      if (teacher.assignedClasses && teacher.assignedClasses.length > 0) {
+        const classIds = teacher.assignedClasses.map((c) => c._id);
+        totalStudents = await Student.countDocuments({
+          classId: { $in: classIds },
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          teacher: {
+            id: teacher._id,
+            name: teacher.name,
+            email: teacher.email,
+            phone: teacher.phone,
+          },
+          assignedClasses: teacher.assignedClasses,
+          assignedSubjects: teacher.assignedSubjects,
+          classTeacherOf,
+          totalStudents,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching teacher dashboard data",
+        error: error.message,
+      });
+    }
+  }
 
   /**
    * Get dashboard stats for admin
