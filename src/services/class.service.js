@@ -1,15 +1,25 @@
 import Class from "../models/class.model.js";
 import Teacher from "../models/teacher.model.js";
+import {
+  normalizeOptionalObjectId,
+  resolveTeacherProfile,
+} from "../utils/profileHelper.js";
 
 class ClassService {
   // Create a new class
   async createClass(classData) {
     try {
+      const data = { ...classData };
+      data.classTeacher = normalizeOptionalObjectId(data.classTeacher);
+      if (data.classTeacher === undefined) {
+        delete data.classTeacher;
+      }
+
       // Check if class already exists
       const existingClass = await Class.findOne({
-        name: classData.name,
-        section: classData.section,
-        academicYear: classData.academicYear,
+        name: data.name,
+        section: data.section,
+        academicYear: data.academicYear,
       });
 
       if (existingClass) {
@@ -19,14 +29,17 @@ class ClassService {
       }
 
       // If classTeacher is provided, validate it's a valid teacher
-      if (classData.classTeacher) {
-        const teacher = await Teacher.findById(classData.classTeacher);
+      if (data.classTeacher) {
+        const teacher = await resolveTeacherProfile(data.classTeacher);
         if (!teacher) {
           throw new Error("Class teacher must be a valid teacher");
         }
+
+        // Always store Teacher profile _id
+        data.classTeacher = teacher._id;
       }
 
-      const newClass = await Class.create(classData);
+      const newClass = await Class.create(data);
       return await Class.findById(newClass._id).populate({
         path: "classTeacher",
         select: "employeeCode qualification",
@@ -120,21 +133,29 @@ class ClassService {
   // Update class
   async updateClass(classId, updateData) {
     try {
+      const data = { ...updateData };
+      data.classTeacher = normalizeOptionalObjectId(data.classTeacher);
+      if (data.classTeacher === undefined) {
+        delete data.classTeacher;
+      }
+
       // If updating classTeacher, validate it's a valid teacher
-      if (updateData.classTeacher) {
-        const teacher = await Teacher.findById(updateData.classTeacher);
+      if (data.classTeacher) {
+        const teacher = await resolveTeacherProfile(data.classTeacher);
         if (!teacher) {
           throw new Error("Class teacher must be a valid teacher");
         }
+
+        data.classTeacher = teacher._id;
       }
 
       // Check for duplicate if name, section, or year is being updated
-      if (updateData.name || updateData.section || updateData.academicYear) {
+      if (data.name || data.section || data.academicYear) {
         const currentClass = await Class.findById(classId);
         const checkData = {
-          name: updateData.name || currentClass.name,
-          section: updateData.section || currentClass.section,
-          academicYear: updateData.academicYear || currentClass.academicYear,
+          name: data.name || currentClass.name,
+          section: data.section || currentClass.section,
+          academicYear: data.academicYear || currentClass.academicYear,
         };
 
         const duplicate = await Class.findOne({
@@ -148,8 +169,7 @@ class ClassService {
           );
         }
       }
-
-      const updatedClass = await Class.findByIdAndUpdate(classId, updateData, {
+      const updatedClass = await Class.findByIdAndUpdate(classId, data, {
         new: true,
         runValidators: true,
       })

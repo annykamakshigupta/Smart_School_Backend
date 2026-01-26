@@ -1,43 +1,63 @@
 import Subject from "../models/subject.model.js";
 import Teacher from "../models/teacher.model.js";
 import Class from "../models/class.model.js";
+import {
+  normalizeOptionalObjectId,
+  resolveTeacherProfile,
+} from "../utils/profileHelper.js";
 
 class SubjectService {
   // Create a new subject
   async createSubject(subjectData) {
     try {
+      const data = { ...subjectData };
+
       // Normalize subject code
-      if (subjectData.code) {
-        subjectData.code = subjectData.code.trim().toUpperCase();
+      if (data.code) {
+        data.code = data.code.trim().toUpperCase();
+      }
+
+      // Normalize optional ObjectId inputs (avoid "Cast to ObjectId failed" when UI sends "")
+      data.assignedTeacher = normalizeOptionalObjectId(data.assignedTeacher);
+      data.classId = normalizeOptionalObjectId(data.classId);
+
+      if (data.assignedTeacher === undefined) {
+        delete data.assignedTeacher;
+      }
+      if (data.classId === undefined) {
+        delete data.classId;
       }
 
       // Check if subject code already exists (check both active and inactive)
-      const existingSubject = await Subject.findOne({ code: subjectData.code });
+      const existingSubject = await Subject.findOne({ code: data.code });
       if (existingSubject) {
         throw new Error("Subject with this code already exists");
       }
 
       // Validate teacher if provided
-      if (subjectData.assignedTeacher) {
-        const teacher = await Teacher.findById(subjectData.assignedTeacher);
+      if (data.assignedTeacher) {
+        const teacher = await resolveTeacherProfile(data.assignedTeacher);
         if (!teacher) {
           throw new Error("Assigned teacher must be a valid teacher");
         }
+
+        // Always store Teacher profile _id
+        data.assignedTeacher = teacher._id;
       }
 
       // Validate class if provided
-      if (subjectData.classId) {
-        const classExists = await Class.findById(subjectData.classId);
+      if (data.classId) {
+        const classExists = await Class.findById(data.classId);
         if (!classExists) {
           throw new Error("Class not found");
         }
       }
 
-      const newSubject = await Subject.create(subjectData);
+      const newSubject = await Subject.create(data);
 
       // If classId is provided, add this subject to the class
-      if (subjectData.classId) {
-        await Class.findByIdAndUpdate(subjectData.classId, {
+      if (data.classId) {
+        await Class.findByIdAndUpdate(data.classId, {
           $addToSet: { subjects: newSubject._id },
         });
       }
@@ -79,7 +99,8 @@ class SubjectService {
       }
 
       if (filters.teacherId) {
-        query.assignedTeacher = filters.teacherId;
+        const teacher = await resolveTeacherProfile(filters.teacherId);
+        query.assignedTeacher = teacher ? teacher._id : filters.teacherId;
       }
 
       // If showAll flag is passed, remove the isActive filter to get all subjects
@@ -132,28 +153,42 @@ class SubjectService {
   // Update subject
   async updateSubject(subjectId, updateData) {
     try {
+      const data = { ...updateData };
+
+      data.assignedTeacher = normalizeOptionalObjectId(data.assignedTeacher);
+      data.classId = normalizeOptionalObjectId(data.classId);
+
+      if (data.assignedTeacher === undefined) {
+        delete data.assignedTeacher;
+      }
+      if (data.classId === undefined) {
+        delete data.classId;
+      }
+
       // Validate teacher if being updated
-      if (updateData.assignedTeacher) {
-        const teacher = await Teacher.findById(updateData.assignedTeacher);
+      if (data.assignedTeacher) {
+        const teacher = await resolveTeacherProfile(data.assignedTeacher);
         if (!teacher) {
           throw new Error("Assigned teacher must be a valid teacher");
         }
+
+        data.assignedTeacher = teacher._id;
       }
 
       // Validate class if being updated
-      if (updateData.classId) {
-        const classExists = await Class.findById(updateData.classId);
+      if (data.classId) {
+        const classExists = await Class.findById(data.classId);
         if (!classExists) {
           throw new Error("Class not found");
         }
       }
 
       // Normalize and check for duplicate code if being updated
-      if (updateData.code) {
-        updateData.code = updateData.code.trim().toUpperCase();
+      if (data.code) {
+        data.code = data.code.trim().toUpperCase();
 
         const duplicate = await Subject.findOne({
-          code: updateData.code,
+          code: data.code,
           _id: { $ne: subjectId },
         });
 
@@ -168,10 +203,7 @@ class SubjectService {
       }
 
       // If classId is changing, update both old and new classes
-      if (
-        updateData.classId &&
-        updateData.classId !== currentSubject.classId?.toString()
-      ) {
+      if (data.classId && data.classId !== currentSubject.classId?.toString()) {
         // Remove from old class
         if (currentSubject.classId) {
           await Class.findByIdAndUpdate(currentSubject.classId, {
@@ -180,16 +212,15 @@ class SubjectService {
         }
 
         // Add to new class
-        await Class.findByIdAndUpdate(updateData.classId, {
+        await Class.findByIdAndUpdate(data.classId, {
           $addToSet: { subjects: subjectId },
         });
       }
 
-      const updatedSubject = await Subject.findByIdAndUpdate(
-        subjectId,
-        updateData,
-        { new: true, runValidators: true },
-      )
+      const updatedSubject = await Subject.findByIdAndUpdate(subjectId, data, {
+        new: true,
+        runValidators: true,
+      })
         .populate({
           path: "assignedTeacher",
           select: "employeeCode qualification",
@@ -235,15 +266,19 @@ class SubjectService {
   // Assign teacher to subject
   async assignTeacher(subjectId, teacherId) {
     try {
+      if (!teacherId) {
+        throw new Error("Must assign a valid teacher");
+      }
+
       // Validate teacher
-      const teacher = await Teacher.findById(teacherId);
+      const teacher = await resolveTeacherProfile(teacherId);
       if (!teacher) {
         throw new Error("Must assign a valid teacher");
       }
 
       const updatedSubject = await Subject.findByIdAndUpdate(
         subjectId,
-        { assignedTeacher: teacherId },
+        { assignedTeacher: teacher._id },
         { new: true },
       ).populate({
         path: "assignedTeacher",

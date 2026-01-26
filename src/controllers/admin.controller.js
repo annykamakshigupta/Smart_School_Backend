@@ -5,6 +5,7 @@ import Teacher from "../models/teacher.model.js";
 import Admin from "../models/admin.model.js";
 import Class from "../models/class.model.js";
 import Subject from "../models/subject.model.js";
+import { resolveTeacherProfile } from "../utils/profileHelper.js";
 import Schedule from "../models/schedule.model.js";
 import Attendance from "../models/attendance.model.js";
 import Result from "../models/result.model.js";
@@ -560,6 +561,11 @@ class AdminController {
       });
       await student.save();
 
+      // Link user to the newly created student profile (1-to-1)
+      user.profileId = student._id;
+      user.profileModel = "Student";
+      await user.save();
+
       // If parent assigned, update parent's children array
       if (parentId) {
         await Parent.findByIdAndUpdate(parentId, {
@@ -939,39 +945,45 @@ class AdminController {
   async linkChildToParent(req, res) {
     try {
       const { parentId, studentId } = req.body;
-      console.log("Parent, student id", parentId, studentId);
-      // Verify parent exists
-      const parent = await Parent.findOne({ userId: parentId });
-      console.log("Parent", parent);
+      // Resolve Parent profile (accept parent profileId OR parent userId)
+      const parent =
+        (await Parent.findById(parentId)) ||
+        (await Parent.findOne({ userId: parentId }));
+
       if (!parent) {
         return res.status(404).json({
           success: false,
-          message: "Parent profile doesn't exits!!",
+          message: "Parent not found",
         });
       }
 
-      // Verify student exists
-      const student = await Student.findOne({ userId: studentId });
+      // Resolve Student profile (accept student profileId OR student userId)
+      const student =
+        (await Student.findById(studentId)) ||
+        (await Student.findOne({ userId: studentId }));
+
       if (!student) {
         return res.status(404).json({
           success: false,
-          message: "Student profile doesn't exits!!",
+          message: "Student not found",
         });
       }
-      console.log("Student", student);
+
+      const parentProfileId = parent._id.toString();
+
       // Remove from old parent if exists
-      if (student.parentId && student.parentId.toString() !== parentId) {
+      if (student.parentId && student.parentId.toString() !== parentProfileId) {
         await Parent.findByIdAndUpdate(student.parentId, {
           $pull: { children: student._id },
         });
       }
 
-      // Update student's parentId
-      student.parentId = parentId;
+      // Update student's parentId (must be Parent profileId)
+      student.parentId = parent._id;
       await student.save();
 
-      // Add to parent's children
-      await Parent.findByIdAndUpdate(parentId, {
+      // Add to parent's children (Parent profileId)
+      await Parent.findByIdAndUpdate(parent._id, {
         $addToSet: { children: student._id },
       });
 
@@ -995,13 +1007,37 @@ class AdminController {
     try {
       const { parentId, studentId } = req.body;
 
+      // Resolve Parent profile (accept parent profileId OR parent userId)
+      const parent =
+        (await Parent.findById(parentId)) ||
+        (await Parent.findOne({ userId: parentId }));
+
+      if (!parent) {
+        return res.status(404).json({
+          success: false,
+          message: "Parent not found",
+        });
+      }
+
+      // Resolve Student profile (accept student profileId OR student userId)
+      const student =
+        (await Student.findById(studentId)) ||
+        (await Student.findOne({ userId: studentId }));
+
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student not found",
+        });
+      }
+
       // Remove from parent's children
-      await Parent.findByIdAndUpdate(parentId, {
-        $pull: { children: studentId },
+      await Parent.findByIdAndUpdate(parent._id, {
+        $pull: { children: student._id },
       });
 
       // Remove parent from student
-      await Student.findByIdAndUpdate(studentId, {
+      await Student.findByIdAndUpdate(student._id, {
         $set: { parentId: null },
       });
 
@@ -1179,7 +1215,7 @@ class AdminController {
         });
       }
 
-      const teacher = await Teacher.findById(teacherId);
+      const teacher = await resolveTeacherProfile(teacherId);
       if (!teacher) {
         return res.status(404).json({
           success: false,
@@ -1187,21 +1223,23 @@ class AdminController {
         });
       }
 
+      const teacherProfileId = teacher._id.toString();
+
       // Remove class from old teacher's assignedClasses if exists
       if (
         classDoc.classTeacher &&
-        classDoc.classTeacher.toString() !== teacherId
+        classDoc.classTeacher.toString() !== teacherProfileId
       ) {
         await Teacher.findByIdAndUpdate(classDoc.classTeacher, {
           $pull: { assignedClasses: classId },
         });
       }
 
-      classDoc.classTeacher = teacherId;
+      classDoc.classTeacher = teacher._id;
       await classDoc.save();
 
       // Add class to new teacher's assigned classes
-      await Teacher.findByIdAndUpdate(teacherId, {
+      await Teacher.findByIdAndUpdate(teacher._id, {
         $addToSet: { assignedClasses: classId },
       });
 
@@ -1306,7 +1344,7 @@ class AdminController {
         });
       }
 
-      const teacher = await Teacher.findById(teacherId);
+      const teacher = await resolveTeacherProfile(teacherId);
       if (!teacher) {
         return res.status(404).json({
           success: false,
@@ -1314,21 +1352,23 @@ class AdminController {
         });
       }
 
+      const teacherProfileId = teacher._id.toString();
+
       // Remove subject from old teacher if exists
       if (
         subject.assignedTeacher &&
-        subject.assignedTeacher.toString() !== teacherId
+        subject.assignedTeacher.toString() !== teacherProfileId
       ) {
         await Teacher.findByIdAndUpdate(subject.assignedTeacher, {
           $pull: { assignedSubjects: subjectId },
         });
       }
 
-      subject.assignedTeacher = teacherId;
+      subject.assignedTeacher = teacher._id;
       await subject.save();
 
       // Add subject to teacher's assigned subjects
-      await Teacher.findByIdAndUpdate(teacherId, {
+      await Teacher.findByIdAndUpdate(teacher._id, {
         $addToSet: { assignedSubjects: subjectId },
       });
 
@@ -1352,7 +1392,15 @@ class AdminController {
     try {
       const { teacherId } = req.params;
 
-      const teacher = await Teacher.findById(teacherId)
+      const resolvedTeacher = await resolveTeacherProfile(teacherId);
+      if (!resolvedTeacher) {
+        return res.status(404).json({
+          success: false,
+          message: "Teacher not found",
+        });
+      }
+
+      const teacher = await Teacher.findById(resolvedTeacher._id)
         .populate("userId", "name email phone")
         .populate("assignedClasses", "name section academicYear")
         .populate({
@@ -1521,7 +1569,17 @@ class AdminController {
     try {
       const { teacherId } = req.params;
 
-      const teacher = await Teacher.findById(teacherId)
+      const resolvedTeacher = await resolveTeacherProfile(teacherId);
+      if (!resolvedTeacher) {
+        return res.status(404).json({
+          success: false,
+          message: "Teacher not found",
+        });
+      }
+
+      const teacherProfileId = resolvedTeacher._id;
+
+      const teacher = await Teacher.findById(teacherProfileId)
         .populate("userId", "name email phone")
         .populate("assignedClasses", "name section academicYear")
         .populate({
@@ -1538,7 +1596,7 @@ class AdminController {
 
       // Get classes where this teacher is class teacher
       const classTeacherOf = await Class.find({
-        classTeacher: teacherId,
+        classTeacher: teacherProfileId,
       }).select("name section academicYear");
 
       // Get student count for assigned classes

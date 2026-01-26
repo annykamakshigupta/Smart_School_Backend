@@ -60,3 +60,29 @@ export const getRoleProfile = async (user, populateOptions = {}) => {
 export const getProfileId = (user) => {
   return user.profileId;
 };
+
+/**
+ * Resolve a Teacher profile by either Teacher profile _id or the related User _id.
+ * This helps endpoints accept payloads that may accidentally send a User id.
+ */
+export const resolveTeacherProfile = async (teacherIdOrUserId) => {
+  if (!teacherIdOrUserId) {
+    return null;
+  }
+
+  const teacher =
+    (await Teacher.findById(teacherIdOrUserId)) ||
+    (await Teacher.findOne({ userId: teacherIdOrUserId }));
+
+  return teacher;
+};
+
+/**
+ * Treat empty-string ObjectId inputs as "not provided".
+ */
+export const normalizeOptionalObjectId = (value) => {
+  if (value === "" || value === null || value === undefined) {
+    return undefined;
+  }
+  return value;
+};
