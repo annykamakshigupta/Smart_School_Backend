@@ -14,7 +14,6 @@ router.post("/users", adminController.createUser);
 router.get("/users/role/:role", adminController.getUsersByRole);
 router.get("/users/:id", adminController.getUserById);
 router.put("/users/:id", adminController.updateUser);
-router.patch("/users/:id/status", adminController.deactivateUser);
 router.post("/users/:id/reset-password", adminController.resetUserPassword);
 router.delete("/users/:id", adminController.deleteUser);
 
