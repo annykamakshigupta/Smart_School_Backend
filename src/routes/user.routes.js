@@ -1,15 +1,16 @@
 import express from "express";
 import {
   login,
-  signup,
   getUsersByRole,
   getCurrentUser,
 } from "../controllers/user.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
+
+// Authentication routes (LOGIN ONLY - signup removed)
 router.post("/login", login);
-router.post("/signup", signup);
+
 router.post("/logout", authenticate, (req, res) => {
   res.status(200).json({
     success: true,

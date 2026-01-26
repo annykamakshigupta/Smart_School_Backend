@@ -7,133 +7,12 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 /**
- * Generate unique admission number for students
+ * User Controller
+ * Handles user authentication (LOGIN ONLY)
+ *
+ * IMPORTANT: Signup has been removed.
+ * All user creation is done by Admin through admin.controller.js
  */
-const generateAdmissionNumber = async () => {
-  const year = new Date().getFullYear().toString().slice(-2);
-  const count = await Student.countDocuments();
-  return `ADM${year}${(count + 1).toString().padStart(5, "0")}`;
-};
-
-/**
- * Generate unique employee code for teachers
- */
-const generateEmployeeCode = async () => {
-  const year = new Date().getFullYear().toString().slice(-2);
-  const count = await Teacher.countDocuments();
-  return `EMP${year}${(count + 1).toString().padStart(4, "0")}`;
-};
-
-/**
- * User Signup
- * Creates user and corresponding role-specific profile
- */
-export const signup = async (req, res) => {
-  try {
-    const { name, email, password, role, phone } = req.body;
-
-    // Validate required fields
-    if (!name || !email || !password || !role || !phone) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required: name, email, password, role, phone",
-      });
-    }
-
-    // Validate role
-    if (!["student", "parent", "teacher", "admin"].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role specified",
-      });
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "User with this email already exists",
-      });
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create user first (without profileId)
-    const user = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role,
-      phone,
-      status: "active",
-    });
-    await user.save();
-
-    // Create role-specific profile based on role
-    let roleProfile = null;
-    let profileModel = null;
-
-    switch (role) {
-      case "student":
-        const admissionNumber = await generateAdmissionNumber();
-        roleProfile = await Student.create({
-          userId: user._id,
-          admissionNumber,
-          academicYear: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
-        });
-        profileModel = "Student";
-        break;
-
-      case "parent":
-        roleProfile = await Parent.create({
-          userId: user._id,
-          children: [],
-        });
-        profileModel = "Parent";
-        break;
-
-      case "teacher":
-        const employeeCode = await generateEmployeeCode();
-        roleProfile = await Teacher.create({
-          userId: user._id,
-          employeeCode,
-        });
-        profileModel = "Teacher";
-        break;
-
-      case "admin":
-        roleProfile = await Admin.create({
-          userId: user._id,
-          adminLevel: "normal",
-        });
-        profileModel = "Admin";
-        break;
-    }
-
-    // Update user with profileId and profileModel (establishing 1-to-1 link)
-    user.profileId = roleProfile._id;
-    user.profileModel = profileModel;
-    await user.save();
-
-    res.status(201).json({
-      success: true,
-      message: "User registered successfully",
-      data: {
-        user: user.toPublicJSON(),
-        roleProfile,
-      },
-    });
-  } catch (err) {
-    // Rollback user creation if role profile fails
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: err.message,
-    });
-  }
-};
 
 /**
  * User Login
@@ -156,14 +35,6 @@ export const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
-      });
-    }
-
-    // Check account status
-    if (user.status !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: `Account is ${user.status}. Please contact administrator.`,
       });
     }
 
@@ -195,7 +66,10 @@ export const login = async (req, res) => {
         case "student":
           roleProfile = await Student.findById(user.profileId)
             .populate("classId", "name section academicYear")
-            .populate("parentId");
+            .populate({
+              path: "parentId",
+              populate: { path: "userId", select: "name email phone" },
+            });
           break;
         case "parent":
           roleProfile = await Parent.findById(user.profileId).populate({
@@ -239,7 +113,7 @@ export const getUsersByRole = async (req, res) => {
   try {
     const { role } = req.query;
 
-    const query = { status: "active" };
+    const query = {};
     if (role) {
       query.role = role;
     }
@@ -322,7 +196,6 @@ export const getCurrentUser = async (req, res) => {
             profileId: user.profileId,
             profileModel: user.profileModel,
             phone: user.phone,
-            status: user.status,
           },
       roleProfile,
     });

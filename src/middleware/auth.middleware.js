@@ -38,13 +38,6 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    if (user.status && user.status !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: "User account is not active",
-      });
-    }
-
     req.user = user;
     next();
   } catch (error) {

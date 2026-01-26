@@ -42,17 +42,26 @@ class AdminController {
 
   /**
    * Create a new user with role-specific profile
+   * ADMIN ONLY: This is the only way to create users in the system
+   * Automatically creates corresponding role profile and establishes 1-to-1 relationship
    */
   async createUser(req, res) {
     try {
-      const { name, email, password, role, phone, status, ...roleData } =
-        req.body;
+      const { name, email, password, role, phone, ...roleData } = req.body;
 
       // Validate required fields
       if (!name || !email || !password || !role || !phone) {
         return res.status(400).json({
           success: false,
           message: "Required fields: name, email, password, role, phone",
+        });
+      }
+
+      // Validate role
+      if (!["student", "parent", "teacher", "admin"].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role. Must be: student, parent, teacher, or admin",
         });
       }
 
@@ -68,67 +77,83 @@ class AdminController {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Create user
+      // Create user first (without profileId)
       const user = new User({
         name,
         email,
         password: hashedPassword,
         role,
         phone,
-        status: status || "active",
       });
       await user.save();
 
-      // Create role-specific profile
+      // Create role-specific profile and establish 1-to-1 relationship
       let roleProfile = null;
-      switch (role) {
-        case "student":
-          const admissionNumber =
-            roleData.admissionNumber || (await generateAdmissionNumber());
-          roleProfile = await Student.create({
-            userId: user._id,
-            admissionNumber,
-            rollNumber: roleData.rollNumber || null,
-            classId: roleData.classId || null,
-            section: roleData.section || null,
-            academicYear:
-              roleData.academicYear ||
-              `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
-            dateOfBirth: roleData.dateOfBirth || null,
-            address: roleData.address || null,
-          });
-          break;
+      let profileModel = null;
 
-        case "parent":
-          roleProfile = await Parent.create({
-            userId: user._id,
-            children: [],
-            relationshipType: roleData.relationshipType || "guardian",
-            occupation: roleData.occupation || null,
-            address: roleData.address || null,
-          });
-          break;
+      try {
+        switch (role) {
+          case "student":
+            const admissionNumber =
+              roleData.admissionNumber || (await generateAdmissionNumber());
+            roleProfile = await Student.create({
+              userId: user._id,
+              admissionNumber,
+              rollNumber: roleData.rollNumber || null,
+              classId: roleData.classId || null,
+              section: roleData.section || null,
+              academicYear:
+                roleData.academicYear ||
+                `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+              dateOfBirth: roleData.dateOfBirth || null,
+              address: roleData.address || null,
+            });
+            profileModel = "Student";
+            break;
 
-        case "teacher":
-          const employeeCode =
-            roleData.employeeCode || (await generateEmployeeCode());
-          roleProfile = await Teacher.create({
-            userId: user._id,
-            employeeCode,
-            qualification: roleData.qualification || null,
-            specialization: roleData.specialization || null,
-            joiningDate: roleData.joiningDate || new Date(),
-            address: roleData.address || null,
-          });
-          break;
+          case "parent":
+            roleProfile = await Parent.create({
+              userId: user._id,
+              children: roleData.linkedStudentIds || [],
+              relationshipType: roleData.relationshipType || "guardian",
+              occupation: roleData.occupation || null,
+              address: roleData.address || null,
+            });
+            profileModel = "Parent";
+            break;
 
-        case "admin":
-          roleProfile = await Admin.create({
-            userId: user._id,
-            adminLevel: roleData.adminLevel || "normal",
-            department: roleData.department || null,
-          });
-          break;
+          case "teacher":
+            const employeeCode =
+              roleData.employeeCode || (await generateEmployeeCode());
+            roleProfile = await Teacher.create({
+              userId: user._id,
+              employeeCode,
+              qualification: roleData.qualification || null,
+              specialization: roleData.specialization || null,
+              joiningDate: roleData.joiningDate || new Date(),
+              address: roleData.address || null,
+            });
+            profileModel = "Teacher";
+            break;
+
+          case "admin":
+            roleProfile = await Admin.create({
+              userId: user._id,
+              adminLevel: roleData.adminLevel || "normal",
+              department: roleData.department || null,
+            });
+            profileModel = "Admin";
+            break;
+        }
+
+        // Update user with profileId and profileModel (establishing 1-to-1 link)
+        user.profileId = roleProfile._id;
+        user.profileModel = profileModel;
+        await user.save();
+      } catch (profileError) {
+        // Rollback: delete user if profile creation fails
+        await User.findByIdAndDelete(user._id);
+        throw profileError;
       }
 
       res.status(201).json({
@@ -141,7 +166,7 @@ class AdminController {
             email: user.email,
             role: user.role,
             phone: user.phone,
-            status: user.status,
+            profileId: user.profileId,
           },
           roleProfile,
         },
@@ -160,11 +185,10 @@ class AdminController {
    */
   async getAllUsers(req, res) {
     try {
-      const { role, status, search, page = 1, limit = 50 } = req.query;
+      const { role, search, page = 1, limit = 50 } = req.query;
 
       const query = {};
       if (role) query.role = role;
-      if (status) query.status = status;
       if (search) {
         query.$or = [
           { name: { $regex: search, $options: "i" } },
@@ -211,8 +235,8 @@ class AdminController {
         });
       }
 
-      const users = await User.find({ role, status: "active" }).select(
-        "_id name email phone",
+      const users = await User.find({ role }).select(
+        "_id name email phone profileId",
       );
 
       res.status(200).json({
@@ -299,7 +323,7 @@ class AdminController {
   async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const { name, email, phone, status } = req.body;
+      const { name, email, phone } = req.body;
 
       const user = await User.findById(id);
       if (!user) {
@@ -324,7 +348,6 @@ class AdminController {
       if (name) user.name = name;
       if (email) user.email = email;
       if (phone) user.phone = phone;
-      if (status) user.status = status;
 
       await user.save();
 
@@ -337,46 +360,13 @@ class AdminController {
           email: user.email,
           role: user.role,
           phone: user.phone,
-          status: user.status,
+          profileId: user.profileId,
         },
       });
     } catch (error) {
       res.status(500).json({
         success: false,
         message: "Error updating user",
-        error: error.message,
-      });
-    }
-  }
-
-  /**
-   * Deactivate/Suspend user
-   */
-  async deactivateUser(req, res) {
-    try {
-      const { id } = req.params;
-      const { status } = req.body;
-
-      const user = await User.findById(id);
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-
-      user.status = status || "suspended";
-      await user.save();
-
-      res.status(200).json({
-        success: true,
-        message: `User ${status || "suspended"} successfully`,
-        data: { id: user._id, status: user.status },
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error deactivating user",
         error: error.message,
       });
     }
@@ -423,7 +413,7 @@ class AdminController {
   }
 
   /**
-   * Delete user (soft delete)
+   * Delete user and associated profile (hard delete)
    */
   async deleteUser(req, res) {
     try {
@@ -437,8 +427,38 @@ class AdminController {
         });
       }
 
-      user.status = "inactive";
-      await user.save();
+      // Delete associated profile based on role
+      if (user.profileId) {
+        switch (user.role) {
+          case "student":
+            // Remove from parent's children array if linked
+            const student = await Student.findById(user.profileId);
+            if (student?.parentId) {
+              await Parent.findByIdAndUpdate(student.parentId, {
+                $pull: { children: student._id },
+              });
+            }
+            await Student.findByIdAndDelete(user.profileId);
+            break;
+          case "parent":
+            // Remove parentId from all linked students
+            await Student.updateMany(
+              { parentId: user.profileId },
+              { $set: { parentId: null } },
+            );
+            await Parent.findByIdAndDelete(user.profileId);
+            break;
+          case "teacher":
+            await Teacher.findByIdAndDelete(user.profileId);
+            break;
+          case "admin":
+            await Admin.findByIdAndDelete(user.profileId);
+            break;
+        }
+      }
+
+      // Delete the user
+      await User.findByIdAndDelete(id);
 
       res.status(200).json({
         success: true,
@@ -517,7 +537,6 @@ class AdminController {
         password: hashedPassword,
         role: "student",
         phone,
-        status: "active",
       });
       await user.save();
 
@@ -585,7 +604,7 @@ class AdminController {
 
       // Fetch students with populated user data
       let students = await Student.find(studentQuery)
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate("classId", "name section academicYear")
         .populate({
           path: "parentId",
@@ -602,10 +621,8 @@ class AdminController {
         );
       }
 
-      // Filter out students with inactive users
-      students = students.filter(
-        (s) => s.userId && s.userId.status === "active",
-      );
+      // Filter out students without valid user reference
+      students = students.filter((s) => s.userId);
 
       res.status(200).json({
         success: true,
@@ -629,7 +646,7 @@ class AdminController {
       const { classId } = req.params;
 
       const students = await Student.find({ classId })
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate({
           path: "parentId",
           populate: { path: "userId", select: "name email phone" },
@@ -658,7 +675,7 @@ class AdminController {
       const { userId } = req.params;
 
       const student = await Student.findOne({ userId })
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate("classId", "name section academicYear subjects")
         .populate({
           path: "parentId",
@@ -890,7 +907,7 @@ class AdminController {
   async getAllParents(req, res) {
     try {
       const parents = await Parent.find()
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate({
           path: "children",
           populate: [
@@ -899,15 +916,13 @@ class AdminController {
           ],
         });
 
-      // Filter active parents
-      const activeParents = parents.filter(
-        (p) => p.userId && p.userId.status === "active",
-      );
+      // Filter parents with valid user reference
+      const validParents = parents.filter((p) => p.userId);
 
       res.status(200).json({
         success: true,
-        count: activeParents.length,
-        data: activeParents,
+        count: validParents.length,
+        data: validParents,
       });
     } catch (error) {
       res.status(500).json({
@@ -1047,19 +1062,17 @@ class AdminController {
   async getAllTeachers(req, res) {
     try {
       const teachers = await Teacher.find()
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate("assignedClasses", "name section")
         .populate("assignedSubjects", "name code");
 
-      // Filter active teachers
-      const activeTeachers = teachers.filter(
-        (t) => t.userId && t.userId.status === "active",
-      );
+      // Filter teachers with valid user reference
+      const validTeachers = teachers.filter((t) => t.userId);
 
       res.status(200).json({
         success: true,
-        count: activeTeachers.length,
-        data: activeTeachers,
+        count: validTeachers.length,
+        data: validTeachers,
       });
     } catch (error) {
       res.status(500).json({
@@ -1078,7 +1091,7 @@ class AdminController {
       const { teacherId } = req.params;
 
       const teacher = await Teacher.findById(teacherId)
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate("assignedClasses", "name section academicYear")
         .populate({
           path: "assignedSubjects",
@@ -1402,11 +1415,11 @@ class AdminController {
       const { parentId } = req.params;
 
       const parent = await Parent.findById(parentId)
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate({
           path: "children",
           populate: [
-            { path: "userId", select: "name email phone status" },
+            { path: "userId", select: "name email phone" },
             {
               path: "classId",
               select: "name section academicYear classTeacher subjects",
@@ -1453,7 +1466,7 @@ class AdminController {
       const { studentId } = req.params;
 
       const student = await Student.findById(studentId)
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate({
           path: "classId",
           populate: [
@@ -1509,7 +1522,7 @@ class AdminController {
       const { teacherId } = req.params;
 
       const teacher = await Teacher.findById(teacherId)
-        .populate("userId", "name email phone status")
+        .populate("userId", "name email phone")
         .populate("assignedClasses", "name section academicYear")
         .populate({
           path: "assignedSubjects",
