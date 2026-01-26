@@ -1,13 +1,19 @@
 import mongoose from "mongoose";
 
+/**
+ * Schedule Model (Timetable)
+ * Purpose: Stores class-wise teaching schedule.
+ */
 const scheduleSchema = new mongoose.Schema(
   {
+    // Class - Class reference
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
       required: [true, "Class is required"],
       index: true,
     },
+    // Section
     section: {
       type: String,
       required: [true, "Section is required"],
@@ -15,33 +21,51 @@ const scheduleSchema = new mongoose.Schema(
       uppercase: true,
       index: true,
     },
+    // Subject ID - Linked subject
     subjectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
       required: [true, "Subject is required"],
       index: true,
     },
+    // Teacher ID - Assigned teacher (references Teacher model)
     teacherId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Teacher",
       required: [true, "Teacher is required"],
       index: true,
     },
+    // Room Number - Classroom
     room: {
       type: String,
       required: [true, "Room is required"],
       trim: true,
       index: true,
     },
+    // Day - Weekday
     dayOfWeek: {
       type: String,
       required: [true, "Day of week is required"],
       enum: {
-        values: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        values: [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ],
         message: "{VALUE} is not a valid day of week",
       },
       index: true,
     },
+    // Period Number - Period index
+    periodNumber: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
+    // Start Time - Period start
     startTime: {
       type: String,
       required: [true, "Start time is required"],
@@ -52,6 +76,7 @@ const scheduleSchema = new mongoose.Schema(
         message: (props) => `${props.value} is not a valid time format (HH:MM)`,
       },
     },
+    // End Time - Period end
     endTime: {
       type: String,
       required: [true, "End time is required"],
@@ -62,6 +87,7 @@ const scheduleSchema = new mongoose.Schema(
         message: (props) => `${props.value} is not a valid time format (HH:MM)`,
       },
     },
+    // Academic Year - Session
     academicYear: {
       type: String,
       required: [true, "Academic year is required"],
@@ -71,6 +97,7 @@ const scheduleSchema = new mongoose.Schema(
       },
       index: true,
     },
+    // Status - Active / Inactive
     isActive: {
       type: Boolean,
       default: true,

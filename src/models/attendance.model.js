@@ -1,96 +1,76 @@
 import mongoose from "mongoose";
 
+/**
+ * Attendance Model
+ * Purpose: Tracks student attendance.
+ */
 const attendanceSchema = new mongoose.Schema(
   {
-    student: {
+    // Student ID - Student reference (references Student model)
+    studentId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Student",
       required: [true, "Student is required"],
       index: true,
     },
-    class: {
+    // Class - Class reference
+    classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
       required: [true, "Class is required"],
       index: true,
     },
-    subject: {
+    // Subject ID - Subject reference
+    subjectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
       required: [true, "Subject is required"],
       index: true,
     },
-    teacher: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: [true, "Teacher is required"],
-      index: true,
-    },
+    // Date - Attendance date
     date: {
       type: Date,
       required: [true, "Date is required"],
       index: true,
     },
+    // Status - Present / Absent / Late
     status: {
       type: String,
       enum: {
-        values: ["present", "absent", "late"],
+        values: ["present", "absent", "late", "excused"],
         message: "{VALUE} is not a valid attendance status",
       },
       required: [true, "Attendance status is required"],
     },
+    // Remarks
     remarks: {
       type: String,
       trim: true,
       maxlength: [500, "Remarks cannot exceed 500 characters"],
+      default: null,
     },
+    // Marked By - Teacher ID (references Teacher model)
     markedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: [true, "Marked by user is required"],
-    },
-    markedByRole: {
-      type: String,
-      enum: ["admin", "teacher"],
-      required: true,
+      ref: "Teacher",
+      required: [true, "Marked by teacher is required"],
     },
   },
   {
-    timestamps: true,
-  }
+    timestamps: true, // Adds createdAt
+  },
 );
 
 // Compound index to ensure one attendance record per student per subject per date
-attendanceSchema.index({ student: 1, subject: 1, date: 1 }, { unique: true });
+attendanceSchema.index(
+  { studentId: 1, subjectId: 1, date: 1 },
+  { unique: true },
+);
 
 // Index for efficient querying
-attendanceSchema.index({ class: 1, date: 1 });
-attendanceSchema.index({ student: 1, date: 1 });
-attendanceSchema.index({ teacher: 1, date: 1 });
-
-// Validate that student role is student
-attendanceSchema.pre("save", async function (next) {
-  if (this.isNew || this.isModified("student")) {
-    const User = mongoose.model("User");
-    const student = await User.findById(this.student);
-    if (!student || student.role !== "student") {
-      throw new Error("Invalid student reference");
-    }
-  }
-  next();
-});
-
-// Validate that teacher role is teacher
-attendanceSchema.pre("save", async function (next) {
-  if (this.isNew || this.isModified("teacher")) {
-    const User = mongoose.model("User");
-    const teacher = await User.findById(this.teacher);
-    if (!teacher || teacher.role !== "teacher") {
-      throw new Error("Invalid teacher reference");
-    }
-  }
-  next();
-});
+attendanceSchema.index({ classId: 1, date: 1 });
+attendanceSchema.index({ studentId: 1, date: 1 });
+attendanceSchema.index({ markedBy: 1, date: 1 });
 
 const Attendance = mongoose.model("Attendance", attendanceSchema);
 

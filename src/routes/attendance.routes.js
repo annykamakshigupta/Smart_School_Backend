@@ -4,10 +4,9 @@ import {
   updateAttendance,
   getAttendanceByClassAndDate,
   getAttendanceByStudent,
-  getAttendanceForChild,
-  getStudentsForAttendance,
-  getAttendanceSummary,
+  getMyAttendance,
   deleteAttendance,
+  getAttendanceStats,
 } from "../controllers/attendance.controller.js";
 import { authenticate, authorize } from "../middleware/auth.middleware.js";
 
@@ -18,7 +17,7 @@ router.post(
   "/mark",
   authenticate,
   authorize(["admin", "teacher"]),
-  markAttendance
+  markAttendance,
 );
 
 // Update attendance (Admin, Teacher)
@@ -26,7 +25,7 @@ router.put(
   "/:id",
   authenticate,
   authorize(["admin", "teacher"]),
-  updateAttendance
+  updateAttendance,
 );
 
 // Delete attendance (Admin only)
@@ -37,39 +36,21 @@ router.get(
   "/class",
   authenticate,
   authorize(["admin", "teacher"]),
-  getAttendanceByClassAndDate
+  getAttendanceByClassAndDate,
 );
 
-// Get students for attendance marking (Admin, Teacher)
+// Get attendance statistics (Admin, Teacher)
 router.get(
-  "/students",
+  "/stats",
   authenticate,
   authorize(["admin", "teacher"]),
-  getStudentsForAttendance
+  getAttendanceStats,
 );
 
-// Get attendance summary/statistics (Admin, Teacher)
-router.get(
-  "/summary",
-  authenticate,
-  authorize(["admin", "teacher"]),
-  getAttendanceSummary
-);
+// Get my attendance (Student only)
+router.get("/my", authenticate, authorize(["student"]), getMyAttendance);
 
-// Get attendance for student (Student - own only, Admin)
-router.get(
-  "/student",
-  authenticate,
-  authorize(["student", "admin"]),
-  getAttendanceByStudent
-);
-
-// Get attendance for child (Parent)
-router.get(
-  "/child",
-  authenticate,
-  authorize(["parent"]),
-  getAttendanceForChild
-);
+// Get attendance for student (Admin, Teacher, Student-own, Parent-children)
+router.get("/student", authenticate, getAttendanceByStudent);
 
 export default router;

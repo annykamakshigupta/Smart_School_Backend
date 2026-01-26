@@ -1,5 +1,5 @@
 import Class from "../models/class.model.js";
-import User from "../models/user.model.js";
+import Teacher from "../models/teacher.model.js";
 
 class ClassService {
   // Create a new class
@@ -18,19 +18,23 @@ class ClassService {
         );
       }
 
-      // If classTeacher is provided, validate it's a teacher
+      // If classTeacher is provided, validate it's a valid teacher
       if (classData.classTeacher) {
-        const teacher = await User.findById(classData.classTeacher);
-        if (!teacher || teacher.role !== "teacher") {
-          throw new Error("Class teacher must be a valid teacher user");
+        const teacher = await Teacher.findById(classData.classTeacher);
+        if (!teacher) {
+          throw new Error("Class teacher must be a valid teacher");
         }
       }
 
       const newClass = await Class.create(classData);
-      return await Class.findById(newClass._id).populate(
-        "classTeacher",
-        "name email",
-      );
+      return await Class.findById(newClass._id).populate({
+        path: "classTeacher",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      });
     } catch (error) {
       throw error;
     }
@@ -50,8 +54,26 @@ class ClassService {
       }
 
       const classes = await Class.find(query)
-        .populate("classTeacher", "name email")
-        .populate("subjects", "name code")
+        .populate({
+          path: "classTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
+        .populate({
+          path: "subjects",
+          select: "name code",
+          populate: {
+            path: "assignedTeacher",
+            select: "employeeCode",
+            populate: {
+              path: "userId",
+              select: "name email",
+            },
+          },
+        })
         .sort({ name: 1, section: 1 });
 
       return classes;
@@ -64,8 +86,26 @@ class ClassService {
   async getClassById(classId) {
     try {
       const classData = await Class.findById(classId)
-        .populate("classTeacher", "name email")
-        .populate("subjects", "name code assignedTeacher");
+        .populate({
+          path: "classTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
+        .populate({
+          path: "subjects",
+          select: "name code",
+          populate: {
+            path: "assignedTeacher",
+            select: "employeeCode",
+            populate: {
+              path: "userId",
+              select: "name email",
+            },
+          },
+        });
 
       if (!classData) {
         throw new Error("Class not found");
@@ -80,11 +120,11 @@ class ClassService {
   // Update class
   async updateClass(classId, updateData) {
     try {
-      // If updating classTeacher, validate it's a teacher
+      // If updating classTeacher, validate it's a valid teacher
       if (updateData.classTeacher) {
-        const teacher = await User.findById(updateData.classTeacher);
-        if (!teacher || teacher.role !== "teacher") {
-          throw new Error("Class teacher must be a valid teacher user");
+        const teacher = await Teacher.findById(updateData.classTeacher);
+        if (!teacher) {
+          throw new Error("Class teacher must be a valid teacher");
         }
       }
 
@@ -113,8 +153,26 @@ class ClassService {
         new: true,
         runValidators: true,
       })
-        .populate("classTeacher", "name email")
-        .populate("subjects", "name code");
+        .populate({
+          path: "classTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
+        .populate({
+          path: "subjects",
+          select: "name code",
+          populate: {
+            path: "assignedTeacher",
+            select: "employeeCode",
+            populate: {
+              path: "userId",
+              select: "name email",
+            },
+          },
+        });
 
       if (!updatedClass) {
         throw new Error("Class not found");

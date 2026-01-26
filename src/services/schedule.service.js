@@ -1,5 +1,6 @@
 import Schedule from "../models/schedule.model.js";
 import Subject from "../models/subject.model.js";
+import Teacher from "../models/teacher.model.js";
 
 class ScheduleService {
   /**
@@ -146,7 +147,14 @@ class ScheduleService {
     return await Schedule.findById(schedule._id)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
-      .populate("teacherId", "name email");
+      .populate({
+        path: "teacherId",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      });
   }
 
   /**
@@ -163,15 +171,21 @@ class ScheduleService {
     // Only filter by academicYear if explicitly provided
     if (filters.academicYear) query.academicYear = filters.academicYear;
 
-    console.log("🔍 Query filters:", JSON.stringify(query, null, 2));
 
     const schedules = await Schedule.find(query)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
-      .populate("teacherId", "name email")
+      .populate({
+        path: "teacherId",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      })
       .sort({ dayOfWeek: 1, startTime: 1 });
 
-    console.log("📊 Query result count:", schedules.length);
+
 
     return schedules;
   }
@@ -183,7 +197,14 @@ class ScheduleService {
     const schedule = await Schedule.findById(scheduleId)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
-      .populate("teacherId", "name email");
+      .populate({
+        path: "teacherId",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      });
 
     if (!schedule) {
       const error = new Error("Schedule not found");
@@ -235,7 +256,14 @@ class ScheduleService {
     return await Schedule.findById(scheduleId)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
-      .populate("teacherId", "name email");
+      .populate({
+        path: "teacherId",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      });
   }
 
   /**
@@ -286,8 +314,6 @@ class ScheduleService {
    * Get weekly schedule for a teacher
    */
   async getWeeklyScheduleForTeacher(teacherId, academicYear) {
-    console.log("🔍 Fetching schedules for teacherId:", teacherId);
-    console.log("🔍 Academic year:", academicYear);
 
     // Only include academicYear in filters if it's provided
     const filters = { teacherId };
@@ -297,7 +323,7 @@ class ScheduleService {
 
     const schedules = await this.getSchedules(filters);
 
-    console.log("📊 Found schedules:", schedules.length);
+
 
     // Organize by day
     const weeklySchedule = {

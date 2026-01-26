@@ -36,15 +36,20 @@ router.get(
 router.post("/parents/link-child", adminController.linkChildToParent);
 router.post("/parents/unlink-child", adminController.unlinkChildFromParent);
 
+// ============ TEACHER MANAGEMENT ============
+router.get("/teachers", adminController.getAllTeachers);
+router.get("/teachers/:teacherId", adminController.getTeacherById);
+router.put("/teachers/:teacherId", adminController.updateTeacher);
+router.get(
+  "/teachers/:teacherId/assignments",
+  adminController.getTeacherAssignments,
+);
+
 // ============ CLASS & SUBJECT ASSIGNMENTS ============
 router.get("/classes/with-teachers", adminController.getAllClassesWithTeachers);
 router.post("/classes/assign-teacher", adminController.assignClassTeacher);
 router.post("/classes/remove-teacher", adminController.removeClassTeacher);
 router.post("/subjects/assign-teacher", adminController.assignTeacherToSubject);
-router.get(
-  "/teachers/:teacherId/assignments",
-  adminController.getTeacherAssignments,
-);
 
 // ============ DASHBOARD DATA ============
 router.get("/dashboard/stats", adminController.getDashboardStats);

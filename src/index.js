@@ -9,6 +9,8 @@ import subjectRoutes from "./routes/subject.routes.js";
 import attendanceRoutes from "./routes/attendance.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import assignmentRoutes from "./routes/assignment.routes.js";
+import resultRoutes from "./routes/result.routes.js";
+import feeRoutes from "./routes/fee.routes.js";
 
 dotenv.config();
 
@@ -35,6 +37,8 @@ app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/assignments", assignmentRoutes);
+app.use("/api/results", resultRoutes);
+app.use("/api/fees", feeRoutes);
 
 const PORT = process.env.PORT || 8080;
 

@@ -1,5 +1,5 @@
 import Subject from "../models/subject.model.js";
-import User from "../models/user.model.js";
+import Teacher from "../models/teacher.model.js";
 import Class from "../models/class.model.js";
 
 class SubjectService {
@@ -19,9 +19,9 @@ class SubjectService {
 
       // Validate teacher if provided
       if (subjectData.assignedTeacher) {
-        const teacher = await User.findById(subjectData.assignedTeacher);
-        if (!teacher || teacher.role !== "teacher") {
-          throw new Error("Assigned teacher must be a valid teacher user");
+        const teacher = await Teacher.findById(subjectData.assignedTeacher);
+        if (!teacher) {
+          throw new Error("Assigned teacher must be a valid teacher");
         }
       }
 
@@ -43,7 +43,14 @@ class SubjectService {
       }
 
       return await Subject.findById(newSubject._id)
-        .populate("assignedTeacher", "name email")
+        .populate({
+          path: "assignedTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
         .populate("classId", "name section");
     } catch (error) {
       throw error;
@@ -80,18 +87,17 @@ class SubjectService {
         delete query.isActive;
       }
 
-      // ...existing code...
-
       const subjects = await Subject.find(query)
-        .populate("assignedTeacher", "name email")
+        .populate({
+          path: "assignedTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
         .populate("classId", "name section")
         .sort({ name: 1 });
-
-      // ...existing code...
-      // ...existing code...
-      `   🗑️  Deleted subjects (isActive: false) are hidden by default`;
-
-      // ...existing code...
 
       return subjects;
     } catch (error) {
@@ -103,7 +109,14 @@ class SubjectService {
   async getSubjectById(subjectId) {
     try {
       const subject = await Subject.findById(subjectId)
-        .populate("assignedTeacher", "name email")
+        .populate({
+          path: "assignedTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
         .populate("classId", "name section academicYear");
 
       if (!subject) {
@@ -121,9 +134,9 @@ class SubjectService {
     try {
       // Validate teacher if being updated
       if (updateData.assignedTeacher) {
-        const teacher = await User.findById(updateData.assignedTeacher);
-        if (!teacher || teacher.role !== "teacher") {
-          throw new Error("Assigned teacher must be a valid teacher user");
+        const teacher = await Teacher.findById(updateData.assignedTeacher);
+        if (!teacher) {
+          throw new Error("Assigned teacher must be a valid teacher");
         }
       }
 
@@ -177,7 +190,14 @@ class SubjectService {
         updateData,
         { new: true, runValidators: true },
       )
-        .populate("assignedTeacher", "name email")
+        .populate({
+          path: "assignedTeacher",
+          select: "employeeCode qualification",
+          populate: {
+            path: "userId",
+            select: "name email phone",
+          },
+        })
         .populate("classId", "name section");
 
       return updatedSubject;
@@ -216,16 +236,23 @@ class SubjectService {
   async assignTeacher(subjectId, teacherId) {
     try {
       // Validate teacher
-      const teacher = await User.findById(teacherId);
-      if (!teacher || teacher.role !== "teacher") {
-        throw new Error("Must assign a valid teacher user");
+      const teacher = await Teacher.findById(teacherId);
+      if (!teacher) {
+        throw new Error("Must assign a valid teacher");
       }
 
       const updatedSubject = await Subject.findByIdAndUpdate(
         subjectId,
         { assignedTeacher: teacherId },
         { new: true },
-      ).populate("assignedTeacher", "name email");
+      ).populate({
+        path: "assignedTeacher",
+        select: "employeeCode qualification",
+        populate: {
+          path: "userId",
+          select: "name email phone",
+        },
+      });
 
       if (!updatedSubject) {
         throw new Error("Subject not found");

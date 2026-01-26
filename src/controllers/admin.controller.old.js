@@ -1,58 +1,28 @@
 import User from "../models/user.model.js";
 import Student from "../models/student.model.js";
 import Parent from "../models/parent.model.js";
-import Teacher from "../models/teacher.model.js";
-import Admin from "../models/admin.model.js";
-import Class from "../models/class.model.js";
-import Subject from "../models/subject.model.js";
-import Schedule from "../models/schedule.model.js";
-import Attendance from "../models/attendance.model.js";
-import Result from "../models/result.model.js";
-import Fee from "../models/fee.model.js";
 import bcrypt from "bcryptjs";
 
 /**
  * Admin Controller
- * Handles all admin-only management operations
- * Following the reference-based design pattern:
- * - User model = identity & login
- * - Student/Parent/Teacher models = role-specific data
+ * Handles all admin-only user management operations
  */
-
-/**
- * Generate unique admission number for students
- */
-const generateAdmissionNumber = async () => {
-  const year = new Date().getFullYear().toString().slice(-2);
-  const count = await Student.countDocuments();
-  return `ADM${year}${(count + 1).toString().padStart(5, "0")}`;
-};
-
-/**
- * Generate unique employee code for teachers
- */
-const generateEmployeeCode = async () => {
-  const year = new Date().getFullYear().toString().slice(-2);
-  const count = await Teacher.countDocuments();
-  return `EMP${year}${(count + 1).toString().padStart(4, "0")}`;
-};
-
 class AdminController {
   // ============ USER MANAGEMENT ============
 
   /**
-   * Create a new user with role-specific profile
+   * Create a new user (admin only)
    */
   async createUser(req, res) {
     try {
-      const { name, email, password, role, phone, status, ...roleData } =
-        req.body;
+      const { name, email, password, role, phone, status } = req.body;
 
       // Validate required fields
       if (!name || !email || !password || !role || !phone) {
         return res.status(400).json({
           success: false,
-          message: "Required fields: name, email, password, role, phone",
+          message:
+            "All fields are required: name, email, password, role, phone",
         });
       }
 
@@ -77,73 +47,24 @@ class AdminController {
         phone,
         status: status || "active",
       });
+
       await user.save();
 
-      // Create role-specific profile
-      let roleProfile = null;
-      switch (role) {
-        case "student":
-          const admissionNumber =
-            roleData.admissionNumber || (await generateAdmissionNumber());
-          roleProfile = await Student.create({
-            userId: user._id,
-            admissionNumber,
-            rollNumber: roleData.rollNumber || null,
-            classId: roleData.classId || null,
-            section: roleData.section || null,
-            academicYear:
-              roleData.academicYear ||
-              `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
-            dateOfBirth: roleData.dateOfBirth || null,
-            address: roleData.address || null,
-          });
-          break;
-
-        case "parent":
-          roleProfile = await Parent.create({
-            userId: user._id,
-            children: [],
-            relationshipType: roleData.relationshipType || "guardian",
-            occupation: roleData.occupation || null,
-            address: roleData.address || null,
-          });
-          break;
-
-        case "teacher":
-          const employeeCode =
-            roleData.employeeCode || (await generateEmployeeCode());
-          roleProfile = await Teacher.create({
-            userId: user._id,
-            employeeCode,
-            qualification: roleData.qualification || null,
-            specialization: roleData.specialization || null,
-            joiningDate: roleData.joiningDate || new Date(),
-            address: roleData.address || null,
-          });
-          break;
-
-        case "admin":
-          roleProfile = await Admin.create({
-            userId: user._id,
-            adminLevel: roleData.adminLevel || "normal",
-            department: roleData.department || null,
-          });
-          break;
+      // If role is parent, create parent profile
+      if (role === "parent") {
+        await Parent.create({ userId: user._id, children: [] });
       }
 
       res.status(201).json({
         success: true,
         message: "User created successfully",
         data: {
-          user: {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            phone: user.phone,
-            status: user.status,
-          },
-          roleProfile,
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone,
+          status: user.status,
         },
       });
     } catch (error) {
@@ -230,7 +151,7 @@ class AdminController {
   }
 
   /**
-   * Get user by ID with role-specific data
+   * Get user by ID
    */
   async getUserById(req, res) {
     try {
@@ -244,45 +165,27 @@ class AdminController {
         });
       }
 
-      // Fetch role-specific profile using profileId
-      let roleProfile = null;
-
-      if (user.profileId) {
-        switch (user.role) {
-          case "student":
-            roleProfile = await Student.findById(user.profileId)
-              .populate("classId", "name section academicYear")
-              .populate({
-                path: "parentId",
-                populate: { path: "userId", select: "name email phone" },
-              });
-            break;
-          case "parent":
-            roleProfile = await Parent.findById(user.profileId).populate({
-              path: "children",
-              populate: [
-                { path: "userId", select: "name email phone" },
-                { path: "classId", select: "name section" },
-              ],
-            });
-            break;
-          case "teacher":
-            roleProfile = await Teacher.findById(user.profileId)
-              .populate("assignedClasses", "name section")
-              .populate("assignedSubjects", "name code");
-            break;
-          case "admin":
-            roleProfile = await Admin.findById(user.profileId);
-            break;
-        }
+      // Get additional info based on role
+      let additionalInfo = {};
+      if (user.role === "student") {
+        const student = await Student.findOne({ userId: id })
+          .populate("classId", "name section")
+          .populate("parentId", "name email phone");
+        additionalInfo = { studentProfile: student };
+      } else if (user.role === "parent") {
+        const parent = await Parent.findOne({ userId: id }).populate({
+          path: "children",
+          populate: [
+            { path: "userId", select: "name email" },
+            { path: "classId", select: "name section" },
+          ],
+        });
+        additionalInfo = { parentProfile: parent };
       }
 
       res.status(200).json({
         success: true,
-        data: {
-          ...user.toObject(),
-          roleProfile,
-        },
+        data: { ...user.toObject(), ...additionalInfo },
       });
     } catch (error) {
       res.status(500).json({
@@ -299,7 +202,7 @@ class AdminController {
   async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const { name, email, phone, status } = req.body;
+      const { name, email, phone, status, role } = req.body;
 
       const user = await User.findById(id);
       if (!user) {
@@ -325,6 +228,11 @@ class AdminController {
       if (email) user.email = email;
       if (phone) user.phone = phone;
       if (status) user.status = status;
+      // Role change is restricted - only update if explicitly allowed
+      if (role && role !== user.role) {
+        // Handle role change implications
+        user.role = role;
+      }
 
       await user.save();
 
@@ -355,7 +263,7 @@ class AdminController {
   async deactivateUser(req, res) {
     try {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status } = req.body; // 'suspended' or 'inactive'
 
       const user = await User.findById(id);
       if (!user) {
@@ -423,7 +331,7 @@ class AdminController {
   }
 
   /**
-   * Delete user (soft delete)
+   * Delete user (soft delete by setting status to inactive)
    */
   async deleteUser(req, res) {
     try {
@@ -437,6 +345,7 @@ class AdminController {
         });
       }
 
+      // Soft delete
       user.status = "inactive";
       await user.save();
 
@@ -470,16 +379,22 @@ class AdminController {
         rollNumber,
         parentId,
         academicYear,
-        dateOfBirth,
-        address,
-        admissionNumber,
       } = req.body;
 
       // Validate required fields
-      if (!name || !email || !password || !phone) {
+      if (
+        !name ||
+        !email ||
+        !password ||
+        !phone ||
+        !classId ||
+        !section ||
+        !rollNumber ||
+        !academicYear
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Required fields: name, email, password, phone",
+          message: "Missing required fields for student enrollment",
         });
       }
 
@@ -492,21 +407,17 @@ class AdminController {
         });
       }
 
-      // Check for duplicate roll number in class (if provided)
-      if (classId && rollNumber) {
-        const existingRoll = await Student.findOne({
-          classId,
-          rollNumber,
-          academicYear:
-            academicYear ||
-            `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+      // Check for duplicate roll number in class
+      const existingRoll = await Student.findOne({
+        classId,
+        rollNumber,
+        academicYear,
+      });
+      if (existingRoll) {
+        return res.status(409).json({
+          success: false,
+          message: "Roll number already exists in this class",
         });
-        if (existingRoll) {
-          return res.status(409).json({
-            success: false,
-            message: "Roll number already exists in this class",
-          });
-        }
       }
 
       // Create user account
@@ -521,31 +432,23 @@ class AdminController {
       });
       await user.save();
 
-      // Generate admission number if not provided
-      const finalAdmissionNumber =
-        admissionNumber || (await generateAdmissionNumber());
-
       // Create student profile
       const student = new Student({
         userId: user._id,
-        admissionNumber: finalAdmissionNumber,
-        classId: classId || null,
-        section: section || null,
-        rollNumber: rollNumber || null,
+        classId,
+        section,
+        rollNumber,
         parentId: parentId || null,
-        academicYear:
-          academicYear ||
-          `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
-        dateOfBirth: dateOfBirth || null,
-        address: address || null,
+        academicYear,
       });
       await student.save();
 
       // If parent assigned, update parent's children array
       if (parentId) {
-        await Parent.findByIdAndUpdate(parentId, {
-          $addToSet: { children: student._id },
-        });
+        await Parent.findOneAndUpdate(
+          { userId: parentId },
+          { $addToSet: { children: student._id } },
+        );
       }
 
       res.status(201).json({
@@ -558,7 +461,7 @@ class AdminController {
             email: user.email,
             role: user.role,
           },
-          student,
+          student: student,
         },
       });
     } catch (error) {
@@ -575,37 +478,37 @@ class AdminController {
    */
   async getAllStudents(req, res) {
     try {
-      const { search, classId, section, academicYear } = req.query;
+      const { search } = req.query;
 
-      // Build query for students
-      const studentQuery = {};
-      if (classId) studentQuery.classId = classId;
-      if (section) studentQuery.section = section;
-      if (academicYear) studentQuery.academicYear = academicYear;
+      // Fetch users with student role - ONLY from User model
+      let studentUsers = await User.find({
+        role: "student",
+        status: "active",
+      }).populate("parentId", "name email phone");
 
-      // Fetch students with populated user data
-      let students = await Student.find(studentQuery)
-        .populate("userId", "name email phone status")
-        .populate("classId", "name section academicYear")
-        .populate({
-          path: "parentId",
-          populate: { path: "userId", select: "name email phone" },
-        })
-        .sort({ createdAt: -1 });
-
-      // Apply search filter on user name
+      // Apply search filter
       if (search) {
-        students = students.filter(
-          (s) =>
-            s.userId &&
-            s.userId.name?.toLowerCase().includes(search.toLowerCase()),
+        studentUsers = studentUsers.filter((s) =>
+          s.name?.toLowerCase().includes(search.toLowerCase()),
         );
       }
 
-      // Filter out students with inactive users
-      students = students.filter(
-        (s) => s.userId && s.userId.status === "active",
-      );
+      // Build student objects
+      const students = studentUsers.map((user) => ({
+        _id: user._id,
+        userId: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          status: user.status,
+        },
+        classId: null,
+        section: null,
+        rollNumber: null,
+        parentId: user.parentId || null,
+        academicYear: null,
+      }));
 
       res.status(200).json({
         success: true,
@@ -630,10 +533,7 @@ class AdminController {
 
       const students = await Student.find({ classId })
         .populate("userId", "name email phone status")
-        .populate({
-          path: "parentId",
-          populate: { path: "userId", select: "name email phone" },
-        })
+        .populate("parentId", "name email phone")
         .sort({ rollNumber: 1 });
 
       res.status(200).json({
@@ -660,10 +560,7 @@ class AdminController {
       const student = await Student.findOne({ userId })
         .populate("userId", "name email phone status")
         .populate("classId", "name section academicYear subjects")
-        .populate({
-          path: "parentId",
-          populate: { path: "userId", select: "name email phone" },
-        });
+        .populate("parentId", "name email phone");
 
       if (!student) {
         return res.status(404).json({
@@ -686,21 +583,12 @@ class AdminController {
   }
 
   /**
-   * Update student info
+   * Update student info (class assignment, roll number, etc.)
    */
   async updateStudent(req, res) {
     try {
       const { id } = req.params;
-      const {
-        classId,
-        section,
-        rollNumber,
-        parentId,
-        academicYear,
-        dateOfBirth,
-        address,
-        enrollmentStatus,
-      } = req.body;
+      const { classId, section, rollNumber, parentId, academicYear } = req.body;
 
       const student = await Student.findById(id);
       if (!student) {
@@ -730,37 +618,33 @@ class AdminController {
       if (parentId !== undefined && parentId !== student.parentId?.toString()) {
         // Remove from old parent
         if (student.parentId) {
-          await Parent.findByIdAndUpdate(student.parentId, {
-            $pull: { children: student._id },
-          });
+          await Parent.findOneAndUpdate(
+            { userId: student.parentId },
+            { $pull: { children: student._id } },
+          );
         }
         // Add to new parent
         if (parentId) {
-          await Parent.findByIdAndUpdate(parentId, {
-            $addToSet: { children: student._id },
-          });
+          await Parent.findOneAndUpdate(
+            { userId: parentId },
+            { $addToSet: { children: student._id } },
+          );
         }
       }
 
       // Update fields
-      if (classId !== undefined) student.classId = classId || null;
-      if (section !== undefined) student.section = section || null;
-      if (rollNumber !== undefined) student.rollNumber = rollNumber || null;
+      if (classId) student.classId = classId;
+      if (section) student.section = section;
+      if (rollNumber) student.rollNumber = rollNumber;
       if (parentId !== undefined) student.parentId = parentId || null;
       if (academicYear) student.academicYear = academicYear;
-      if (dateOfBirth !== undefined) student.dateOfBirth = dateOfBirth;
-      if (address !== undefined) student.address = address;
-      if (enrollmentStatus) student.enrollmentStatus = enrollmentStatus;
 
       await student.save();
 
       const updatedStudent = await Student.findById(id)
         .populate("userId", "name email phone")
         .populate("classId", "name section")
-        .populate({
-          path: "parentId",
-          populate: { path: "userId", select: "name email phone" },
-        });
+        .populate("parentId", "name email phone");
 
       res.status(200).json({
         success: true,
@@ -791,7 +675,7 @@ class AdminController {
         });
       }
 
-      const parent = await Parent.findById(parentId);
+      const parent = await Parent.findOne({ userId: parentId });
       if (!parent) {
         return res.status(404).json({
           success: false,
@@ -801,9 +685,10 @@ class AdminController {
 
       // Remove from old parent if exists
       if (student.parentId) {
-        await Parent.findByIdAndUpdate(student.parentId, {
-          $pull: { children: student._id },
-        });
+        await Parent.findOneAndUpdate(
+          { userId: student.parentId },
+          { $pull: { children: student._id } },
+        );
       }
 
       // Assign new parent
@@ -811,9 +696,10 @@ class AdminController {
       await student.save();
 
       // Add student to parent's children
-      await Parent.findByIdAndUpdate(parentId, {
-        $addToSet: { children: student._id },
-      });
+      await Parent.findOneAndUpdate(
+        { userId: parentId },
+        { $addToSet: { children: student._id } },
+      );
 
       res.status(200).json({
         success: true,
@@ -844,24 +730,22 @@ class AdminController {
       }
 
       // Check roll number uniqueness in new class
-      if (newRollNumber) {
-        const existingRoll = await Student.findOne({
-          classId: newClassId,
-          rollNumber: newRollNumber,
-          academicYear: student.academicYear,
-          _id: { $ne: studentId },
+      const existingRoll = await Student.findOne({
+        classId: newClassId,
+        rollNumber: newRollNumber,
+        academicYear: student.academicYear,
+        _id: { $ne: studentId },
+      });
+      if (existingRoll) {
+        return res.status(409).json({
+          success: false,
+          message: "Roll number already exists in the new class",
         });
-        if (existingRoll) {
-          return res.status(409).json({
-            success: false,
-            message: "Roll number already exists in the new class",
-          });
-        }
       }
 
       student.classId = newClassId;
       student.section = newSection || student.section;
-      student.rollNumber = newRollNumber || null;
+      student.rollNumber = newRollNumber;
       await student.save();
 
       const updatedStudent = await Student.findById(studentId)
@@ -889,25 +773,51 @@ class AdminController {
    */
   async getAllParents(req, res) {
     try {
-      const parents = await Parent.find()
-        .populate("userId", "name email phone status")
-        .populate({
-          path: "children",
-          populate: [
-            { path: "userId", select: "name email" },
-            { path: "classId", select: "name section" },
-          ],
-        });
+      // Fetch all users with parent role - ONLY from User model
+      const parentUsers = await User.find({ role: "parent", status: "active" });
 
-      // Filter active parents
-      const activeParents = parents.filter(
-        (p) => p.userId && p.userId.status === "active",
-      );
+      // Fetch all student users - ONLY from User model
+      const allStudents = await User.find({
+        role: "student",
+        status: "active",
+      });
+
+      // Build parent objects with their children
+      const parents = parentUsers.map((parentUser) => {
+        // Find all students where parentId matches this parent's user ID
+        const children = allStudents.filter(
+          (student) =>
+            student.parentId &&
+            student.parentId.toString() === parentUser._id.toString(),
+        );
+
+        return {
+          _id: parentUser._id,
+          userId: {
+            _id: parentUser._id,
+            name: parentUser.name,
+            email: parentUser.email,
+            phone: parentUser.phone,
+            status: parentUser.status,
+          },
+          children: children.map((child) => ({
+            _id: child._id,
+            userId: {
+              _id: child._id,
+              name: child.name,
+              email: child.email,
+            },
+            classId: null,
+            section: null,
+            rollNumber: null,
+          })),
+        };
+      });
 
       res.status(200).json({
         success: true,
-        count: activeParents.length,
-        data: activeParents,
+        count: parents.length,
+        data: parents,
       });
     } catch (error) {
       res.status(500).json({
@@ -924,41 +834,28 @@ class AdminController {
   async linkChildToParent(req, res) {
     try {
       const { parentId, studentId } = req.body;
-      console.log("Parent, student id", parentId, studentId);
-      // Verify parent exists
-      const parent = await Parent.findOne({ userId: parentId });
-      console.log("Parent", parent);
-      if (!parent) {
+
+      // Verify parent user exists
+      const parentUser = await User.findById(parentId);
+      if (!parentUser || parentUser.role !== "parent") {
         return res.status(404).json({
           success: false,
-          message: "Parent profile doesn't exits!!",
+          message: "Parent user not found",
         });
       }
 
-      // Verify student exists
-      const student = await Student.findOne({ userId: studentId });
-      if (!student) {
+      // Verify student user exists
+      const studentUser = await User.findById(studentId);
+      if (!studentUser || studentUser.role !== "student") {
         return res.status(404).json({
           success: false,
-          message: "Student profile doesn't exits!!",
-        });
-      }
-      console.log("Student", student);
-      // Remove from old parent if exists
-      if (student.parentId && student.parentId.toString() !== parentId) {
-        await Parent.findByIdAndUpdate(student.parentId, {
-          $pull: { children: student._id },
+          message: "Student user not found",
         });
       }
 
-      // Update student's parentId
-      student.parentId = parentId;
-      await student.save();
-
-      // Add to parent's children
-      await Parent.findByIdAndUpdate(parentId, {
-        $addToSet: { children: student._id },
-      });
+      // Update student's parentId in User model
+      studentUser.parentId = parentId;
+      await studentUser.save();
 
       res.status(200).json({
         success: true,
@@ -980,15 +877,12 @@ class AdminController {
     try {
       const { parentId, studentId } = req.body;
 
-      // Remove from parent's children
-      await Parent.findByIdAndUpdate(parentId, {
-        $pull: { children: studentId },
-      });
-
-      // Remove parent from student
-      await Student.findByIdAndUpdate(studentId, {
-        $set: { parentId: null },
-      });
+      // Find student user and remove parentId
+      const studentUser = await User.findById(studentId);
+      if (studentUser && studentUser.role === "student") {
+        studentUser.parentId = null;
+        await studentUser.save();
+      }
 
       res.status(200).json({
         success: true,
@@ -1010,7 +904,7 @@ class AdminController {
     try {
       const { parentId } = req.params;
 
-      const parent = await Parent.findById(parentId).populate({
+      const parent = await Parent.findOne({ userId: parentId }).populate({
         path: "children",
         populate: [
           { path: "userId", select: "name email phone" },
@@ -1039,117 +933,7 @@ class AdminController {
     }
   }
 
-  // ============ TEACHER MANAGEMENT ============
-
-  /**
-   * Get all teachers
-   */
-  async getAllTeachers(req, res) {
-    try {
-      const teachers = await Teacher.find()
-        .populate("userId", "name email phone status")
-        .populate("assignedClasses", "name section")
-        .populate("assignedSubjects", "name code");
-
-      // Filter active teachers
-      const activeTeachers = teachers.filter(
-        (t) => t.userId && t.userId.status === "active",
-      );
-
-      res.status(200).json({
-        success: true,
-        count: activeTeachers.length,
-        data: activeTeachers,
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error fetching teachers",
-        error: error.message,
-      });
-    }
-  }
-
-  /**
-   * Get teacher by ID
-   */
-  async getTeacherById(req, res) {
-    try {
-      const { teacherId } = req.params;
-
-      const teacher = await Teacher.findById(teacherId)
-        .populate("userId", "name email phone status")
-        .populate("assignedClasses", "name section academicYear")
-        .populate({
-          path: "assignedSubjects",
-          populate: { path: "classId", select: "name section" },
-        });
-
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: "Teacher not found",
-        });
-      }
-
-      res.status(200).json({
-        success: true,
-        data: teacher,
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error fetching teacher",
-        error: error.message,
-      });
-    }
-  }
-
-  /**
-   * Update teacher profile
-   */
-  async updateTeacher(req, res) {
-    try {
-      const { teacherId } = req.params;
-      const {
-        qualification,
-        specialization,
-        employmentStatus,
-        address,
-        experience,
-      } = req.body;
-
-      const teacher = await Teacher.findById(teacherId);
-      if (!teacher) {
-        return res.status(404).json({
-          success: false,
-          message: "Teacher not found",
-        });
-      }
-
-      if (qualification !== undefined) teacher.qualification = qualification;
-      if (specialization !== undefined) teacher.specialization = specialization;
-      if (employmentStatus) teacher.employmentStatus = employmentStatus;
-      if (address !== undefined) teacher.address = address;
-      if (experience !== undefined) teacher.experience = experience;
-
-      await teacher.save();
-
-      res.status(200).json({
-        success: true,
-        message: "Teacher updated successfully",
-        data: teacher,
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error updating teacher",
-        error: error.message,
-      });
-    }
-  }
-
-  // ============ CLASS & TEACHER ASSIGNMENTS ============
+  // ============ CLASS TEACHER ASSIGNMENT ============
 
   /**
    * Assign class teacher
@@ -1157,6 +941,8 @@ class AdminController {
   async assignClassTeacher(req, res) {
     try {
       const { classId, teacherId } = req.body;
+
+      const Class = (await import("../models/class.model.js")).default;
 
       const classDoc = await Class.findById(classId);
       if (!classDoc) {
@@ -1166,7 +952,7 @@ class AdminController {
         });
       }
 
-      const teacher = await Teacher.findById(teacherId);
+      const teacher = await User.findOne({ _id: teacherId, role: "teacher" });
       if (!teacher) {
         return res.status(404).json({
           success: false,
@@ -1179,7 +965,7 @@ class AdminController {
         classDoc.classTeacher &&
         classDoc.classTeacher.toString() !== teacherId
       ) {
-        await Teacher.findByIdAndUpdate(classDoc.classTeacher, {
+        await User.findByIdAndUpdate(classDoc.classTeacher, {
           $pull: { assignedClasses: classId },
         });
       }
@@ -1188,14 +974,14 @@ class AdminController {
       await classDoc.save();
 
       // Add class to new teacher's assigned classes
-      await Teacher.findByIdAndUpdate(teacherId, {
+      await User.findByIdAndUpdate(teacherId, {
         $addToSet: { assignedClasses: classId },
       });
 
-      const updatedClass = await Class.findById(classId).populate({
-        path: "classTeacher",
-        populate: { path: "userId", select: "name email phone" },
-      });
+      const updatedClass = await Class.findById(classId).populate(
+        "classTeacher",
+        "name email phone",
+      );
 
       res.status(200).json({
         success: true,
@@ -1218,6 +1004,8 @@ class AdminController {
     try {
       const { classId } = req.body;
 
+      const Class = (await import("../models/class.model.js")).default;
+
       const classDoc = await Class.findById(classId);
       if (!classDoc) {
         return res.status(404).json({
@@ -1228,7 +1016,7 @@ class AdminController {
 
       // Remove class from teacher's assignedClasses
       if (classDoc.classTeacher) {
-        await Teacher.findByIdAndUpdate(classDoc.classTeacher, {
+        await User.findByIdAndUpdate(classDoc.classTeacher, {
           $pull: { assignedClasses: classId },
         });
       }
@@ -1250,15 +1038,14 @@ class AdminController {
   }
 
   /**
-   * Get all classes with teacher info
+   * Get all classes with teacher info (for admin assignment page)
    */
   async getAllClassesWithTeachers(req, res) {
     try {
+      const Class = (await import("../models/class.model.js")).default;
+
       const classes = await Class.find({ isActive: true })
-        .populate({
-          path: "classTeacher",
-          populate: { path: "userId", select: "name email phone" },
-        })
+        .populate("classTeacher", "name email phone")
         .populate("subjects", "name code")
         .sort({ name: 1, section: 1 });
 
@@ -1276,7 +1063,7 @@ class AdminController {
     }
   }
 
-  // ============ SUBJECT & TEACHER ASSIGNMENTS ============
+  // ============ TEACHER SUBJECT ASSIGNMENT ============
 
   /**
    * Assign teacher to subject
@@ -1284,6 +1071,8 @@ class AdminController {
   async assignTeacherToSubject(req, res) {
     try {
       const { subjectId, teacherId } = req.body;
+
+      const Subject = (await import("../models/subject.model.js")).default;
 
       const subject = await Subject.findById(subjectId);
       if (!subject) {
@@ -1293,7 +1082,7 @@ class AdminController {
         });
       }
 
-      const teacher = await Teacher.findById(teacherId);
+      const teacher = await User.findOne({ _id: teacherId, role: "teacher" });
       if (!teacher) {
         return res.status(404).json({
           success: false,
@@ -1301,21 +1090,11 @@ class AdminController {
         });
       }
 
-      // Remove subject from old teacher if exists
-      if (
-        subject.assignedTeacher &&
-        subject.assignedTeacher.toString() !== teacherId
-      ) {
-        await Teacher.findByIdAndUpdate(subject.assignedTeacher, {
-          $pull: { assignedSubjects: subjectId },
-        });
-      }
-
       subject.assignedTeacher = teacherId;
       await subject.save();
 
       // Add subject to teacher's assigned subjects
-      await Teacher.findByIdAndUpdate(teacherId, {
+      await User.findByIdAndUpdate(teacherId, {
         $addToSet: { assignedSubjects: subjectId },
       });
 
@@ -1339,33 +1118,17 @@ class AdminController {
     try {
       const { teacherId } = req.params;
 
-      const teacher = await Teacher.findById(teacherId)
-        .populate("userId", "name email phone")
+      const teacher = await User.findById(teacherId)
         .populate("assignedClasses", "name section academicYear")
         .populate({
           path: "assignedSubjects",
           populate: { path: "classId", select: "name section" },
         });
 
-      if (!teacher) {
+      if (!teacher || teacher.role !== "teacher") {
         return res.status(404).json({
           success: false,
           message: "Teacher not found",
-        });
-      }
-
-      // Get classes where this teacher is class teacher
-      const classTeacherOf = await Class.find({
-        classTeacher: teacherId,
-      }).select("name section academicYear");
-
-      // Get student count for assigned classes
-      let totalStudents = 0;
-      if (teacher.assignedClasses && teacher.assignedClasses.length > 0) {
-        const classIds = teacher.assignedClasses.map((c) => c._id);
-        totalStudents = await Student.countDocuments({
-          classId: { $in: classIds },
-          enrollmentStatus: "active",
         });
       }
 
@@ -1374,13 +1137,11 @@ class AdminController {
         data: {
           teacher: {
             id: teacher._id,
-            userId: teacher.userId,
-            employeeCode: teacher.employeeCode,
+            name: teacher.name,
+            email: teacher.email,
           },
           assignedClasses: teacher.assignedClasses,
           assignedSubjects: teacher.assignedSubjects,
-          classTeacherOf,
-          totalStudents,
         },
       });
     } catch (error) {
@@ -1395,31 +1156,26 @@ class AdminController {
   // ============ DASHBOARD DATA ============
 
   /**
-   * Get parent dashboard data
+   * Get parent dashboard data (for logged-in parent)
    */
   async getParentDashboardData(req, res) {
     try {
       const { parentId } = req.params;
 
-      const parent = await Parent.findById(parentId)
-        .populate("userId", "name email phone status")
-        .populate({
-          path: "children",
-          populate: [
-            { path: "userId", select: "name email phone status" },
-            {
-              path: "classId",
-              select: "name section academicYear classTeacher subjects",
-              populate: [
-                {
-                  path: "classTeacher",
-                  populate: { path: "userId", select: "name email phone" },
-                },
-                { path: "subjects", select: "name code" },
-              ],
-            },
-          ],
-        });
+      const parent = await Parent.findOne({ userId: parentId }).populate({
+        path: "children",
+        populate: [
+          { path: "userId", select: "name email phone status" },
+          {
+            path: "classId",
+            select: "name section academicYear classTeacher subjects",
+            populate: [
+              { path: "classTeacher", select: "name email phone" },
+              { path: "subjects", select: "name code" },
+            ],
+          },
+        ],
+      });
 
       if (!parent) {
         return res.status(404).json({
@@ -1428,10 +1184,15 @@ class AdminController {
         });
       }
 
+      // Get user info
+      const userInfo = await User.findById(parentId).select(
+        "name email phone status",
+      );
+
       res.status(200).json({
         success: true,
         data: {
-          parent: parent.userId,
+          parent: userInfo,
           parentProfile: parent,
           children: parent.children,
         },
@@ -1446,35 +1207,22 @@ class AdminController {
   }
 
   /**
-   * Get student dashboard data
+   * Get student dashboard data (for logged-in student)
    */
   async getStudentDashboardData(req, res) {
     try {
       const { studentId } = req.params;
 
-      const student = await Student.findById(studentId)
+      const student = await Student.findOne({ userId: studentId })
         .populate("userId", "name email phone status")
         .populate({
           path: "classId",
           populate: [
-            {
-              path: "classTeacher",
-              populate: { path: "userId", select: "name email phone" },
-            },
-            {
-              path: "subjects",
-              select: "name code assignedTeacher",
-              populate: {
-                path: "assignedTeacher",
-                populate: { path: "userId", select: "name" },
-              },
-            },
+            { path: "classTeacher", select: "name email phone" },
+            { path: "subjects", select: "name code assignedTeacher" },
           ],
         })
-        .populate({
-          path: "parentId",
-          populate: { path: "userId", select: "name email phone" },
-        });
+        .populate("parentId", "name email phone");
 
       if (!student) {
         return res.status(404).json({
@@ -1483,13 +1231,22 @@ class AdminController {
         });
       }
 
+      // Get parent profile with more details
+      let parentInfo = null;
+      if (student.parentId) {
+        const parentProfile = await Parent.findOne({
+          userId: student.parentId,
+        }).populate("userId", "name email phone");
+        parentInfo = parentProfile;
+      }
+
       res.status(200).json({
         success: true,
         data: {
           student,
           classInfo: student.classId,
           classTeacher: student.classId?.classTeacher,
-          parentInfo: student.parentId,
+          parentInfo,
         },
       });
     } catch (error) {
@@ -1502,21 +1259,23 @@ class AdminController {
   }
 
   /**
-   * Get teacher dashboard data
+   * Get teacher dashboard data (for logged-in teacher)
    */
   async getTeacherDashboardData(req, res) {
     try {
       const { teacherId } = req.params;
+      const Class = (await import("../models/class.model.js")).default;
+      const Subject = (await import("../models/subject.model.js")).default;
 
-      const teacher = await Teacher.findById(teacherId)
-        .populate("userId", "name email phone status")
+      const teacher = await User.findById(teacherId)
+        .select("-password")
         .populate("assignedClasses", "name section academicYear")
         .populate({
           path: "assignedSubjects",
           populate: { path: "classId", select: "name section" },
         });
 
-      if (!teacher) {
+      if (!teacher || teacher.role !== "teacher") {
         return res.status(404).json({
           success: false,
           message: "Teacher not found",
@@ -1534,7 +1293,6 @@ class AdminController {
         const classIds = teacher.assignedClasses.map((c) => c._id);
         totalStudents = await Student.countDocuments({
           classId: { $in: classIds },
-          enrollmentStatus: "active",
         });
       }
 
@@ -1543,10 +1301,9 @@ class AdminController {
         data: {
           teacher: {
             id: teacher._id,
-            userId: teacher.userId,
-            employeeCode: teacher.employeeCode,
-            qualification: teacher.qualification,
-            specialization: teacher.specialization,
+            name: teacher.name,
+            email: teacher.email,
+            phone: teacher.phone,
           },
           assignedClasses: teacher.assignedClasses,
           assignedSubjects: teacher.assignedSubjects,
@@ -1568,6 +1325,9 @@ class AdminController {
    */
   async getDashboardStats(req, res) {
     try {
+      const Class = (await import("../models/class.model.js")).default;
+      const Subject = (await import("../models/subject.model.js")).default;
+
       const [
         totalUsers,
         totalStudents,
@@ -1575,17 +1335,17 @@ class AdminController {
         totalParents,
         totalClasses,
         totalSubjects,
-        activeStudents,
-        activeTeachers,
+        activeUsers,
+        suspendedUsers,
       ] = await Promise.all([
         User.countDocuments(),
-        Student.countDocuments(),
-        Teacher.countDocuments(),
-        Parent.countDocuments(),
+        User.countDocuments({ role: "student" }),
+        User.countDocuments({ role: "teacher" }),
+        User.countDocuments({ role: "parent" }),
         Class.countDocuments({ isActive: true }),
         Subject.countDocuments({ isActive: true }),
-        Student.countDocuments({ enrollmentStatus: "active" }),
-        Teacher.countDocuments({ employmentStatus: "active" }),
+        User.countDocuments({ status: "active" }),
+        User.countDocuments({ status: "suspended" }),
       ]);
 
       res.status(200).json({
@@ -1597,8 +1357,8 @@ class AdminController {
           totalParents,
           totalClasses,
           totalSubjects,
-          activeStudents,
-          activeTeachers,
+          activeUsers,
+          suspendedUsers,
         },
       });
     } catch (error) {

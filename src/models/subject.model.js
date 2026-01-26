@@ -1,12 +1,18 @@
 import mongoose from "mongoose";
 
+/**
+ * Subject Model
+ * Purpose: Defines subjects offered in each class.
+ */
 const subjectSchema = new mongoose.Schema(
   {
+    // Subject Name - Name of subject
     name: {
       type: String,
       required: [true, "Subject name is required"],
       trim: true,
     },
+    // Subject Code - Subject reference code (unique)
     code: {
       type: String,
       required: [true, "Subject code is required"],
@@ -14,23 +20,37 @@ const subjectSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
+    // Assigned Teacher - Teacher reference (references Teacher model)
     assignedTeacher: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Teacher",
+      default: null,
     },
+    // Class - Associated class
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
+      default: null,
     },
+    // Academic Year - Academic session
     academicYear: {
       type: String,
       required: [true, "Academic year is required"],
       trim: true,
     },
+    // Description
     description: {
       type: String,
       trim: true,
+      default: null,
     },
+    // Credits/Weightage
+    credits: {
+      type: Number,
+      min: 0,
+      default: 1,
+    },
+    // Is Active
     isActive: {
       type: Boolean,
       default: true,
@@ -38,7 +58,7 @@ const subjectSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Index for faster queries

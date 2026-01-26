@@ -1,4 +1,6 @@
 import scheduleService from "../services/schedule.service.js";
+import Teacher from "../models/teacher.model.js";
+import Student from "../models/student.model.js";
 import mongoose from "mongoose";
 
 /**
@@ -43,15 +45,22 @@ export const getSchedules = async (req, res) => {
 
     // Apply role-based filtering
     if (userRole === "teacher") {
-      filters.teacherId = req.user._id;
+      // Use profileId directly
+      if (req.user.profileId) {
+        filters.teacherId = req.user.profileId;
+      }
     } else if (userRole === "student") {
-      // Assuming student has classId and section in their profile
-      filters.classId = req.user.classId;
-      filters.section = req.user.section;
+      // Get student profile to get classId and section
+      if (req.user.profileId) {
+        const student = await Student.findById(req.user.profileId);
+        if (student) {
+          filters.classId = student.classId;
+          filters.section = student.section;
+        }
+      }
     } else if (userRole === "parent") {
-      // Parents should see their children's schedules
-      // This would require additional logic to fetch children's class info
-      // For now, we'll allow query params
+      // Parents should see their children's schedules via query params
+      // Additional logic would be needed to fetch children's class info
     }
 
     // Allow query parameters for additional filtering
@@ -203,11 +212,14 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
       new Date().getFullYear() + "-" + (new Date().getFullYear() + 1);
 
     // Only allow teachers to view their own schedule (unless admin)
-    if (req.user.role === "teacher" && req.user._id.toString() !== teacherId) {
-      return res.status(403).json({
-        success: false,
-        message: "You can only view your own schedule",
-      });
+    if (req.user.role === "teacher") {
+      const teacher = await Teacher.findOne({ userId: req.user._id });
+      if (!teacher || teacher._id.toString() !== teacherId) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view your own schedule",
+        });
+      }
     }
 
     const weeklySchedule = await scheduleService.getWeeklyScheduleForTeacher(
@@ -234,9 +246,16 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
  */
 export const getTeacherSchedule = async (req, res) => {
   try {
-    console.log("✅ getTeacherSchedule called for teacher:", req.user._id);
-    const teacherId = req.user._id;
+    // Get teacher profile from userId
+    const teacher = await Teacher.findOne({ userId: req.user._id });
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: "Teacher profile not found",
+      });
+    }
 
+    const teacherId = teacher._id;
     // Only use academicYear if explicitly provided in query params
     // Otherwise, fetch schedules for all academic years
     const academicYear = req.query.academicYear || null;

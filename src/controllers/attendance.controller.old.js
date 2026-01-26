@@ -1,17 +1,9 @@
 import Attendance from "../models/attendance.model.js";
-import Student from "../models/student.model.js";
-import Teacher from "../models/teacher.model.js";
+import User from "../models/user.model.js";
 import Class from "../models/class.model.js";
 import Subject from "../models/subject.model.js";
 import Schedule from "../models/schedule.model.js";
 import mongoose from "mongoose";
-
-/**
- * Attendance Controller
- * Updated to work with the reference-based design:
- * - Student model contains studentId (references Student, not User)
- * - Teacher references Teacher model
- */
 
 /**
  * Mark attendance for students
@@ -55,28 +47,12 @@ export const markAttendance = async (req, res) => {
       });
     }
 
-    // Get teacher record for current user
-    let teacherRecord = null;
+    // If teacher, verify they are assigned to this class/subject
     if (user.role === "teacher") {
-      if (!user.profileId) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-      teacherRecord = await Teacher.findById(user.profileId);
-      if (!teacherRecord) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-
-      // Verify teacher is assigned to this class/subject
       const schedule = await Schedule.findOne({
         classId: classId,
         subjectId: subjectId,
-        teacherId: teacherRecord._id,
+        teacherId: user._id,
       });
 
       if (!schedule) {
@@ -84,15 +60,6 @@ export const markAttendance = async (req, res) => {
           success: false,
           message: "You are not assigned to teach this subject in this class",
         });
-      }
-    } else if (user.role === "admin") {
-      // For admin, get the assigned teacher for this class/subject
-      const schedule = await Schedule.findOne({
-        classId: classId,
-        subjectId: subjectId,
-      });
-      if (schedule) {
-        teacherRecord = await Teacher.findById(schedule.teacherId);
       }
     }
 
@@ -108,6 +75,19 @@ export const markAttendance = async (req, res) => {
       });
     }
 
+    // Get teacher ID (for teacher role, use their own ID)
+    let teacherId;
+    if (user.role === "teacher") {
+      teacherId = user._id;
+    } else {
+      // For admin, get the assigned teacher for this class/subject
+      const schedule = await Schedule.findOne({
+        classId: classId,
+        subjectId: subjectId,
+      });
+      teacherId = schedule ? schedule.teacherId : user._id;
+    }
+
     const savedRecords = [];
     const errors = [];
 
@@ -116,9 +96,9 @@ export const markAttendance = async (req, res) => {
       const { studentId, status, remarks } = record;
 
       try {
-        // Verify student exists
-        const student = await Student.findById(studentId);
-        if (!student) {
+        // Verify student exists and has student role
+        const student = await User.findById(studentId);
+        if (!student || student.role !== "student") {
           errors.push({
             studentId,
             message: "Invalid student",
@@ -128,8 +108,8 @@ export const markAttendance = async (req, res) => {
 
         // Check if attendance already exists for this student/subject/date
         const existingAttendance = await Attendance.findOne({
-          studentId: studentId,
-          subjectId: subjectId,
+          student: studentId,
+          subject: subjectId,
           date: attendanceDate,
         });
 
@@ -137,20 +117,25 @@ export const markAttendance = async (req, res) => {
           // Update existing attendance
           existingAttendance.status = status;
           existingAttendance.remarks = remarks || existingAttendance.remarks;
-          existingAttendance.markedBy = teacherRecord?._id || null;
+          existingAttendance.markedBy = user._id;
+          existingAttendance.markedByRole = user.role;
+          existingAttendance.class = classId;
+          existingAttendance.teacher = teacherId;
 
           await existingAttendance.save();
           savedRecords.push(existingAttendance);
         } else {
           // Create new attendance record
           const attendance = new Attendance({
-            studentId: studentId,
-            classId: classId,
-            subjectId: subjectId,
+            student: studentId,
+            class: classId,
+            subject: subjectId,
+            teacher: teacherId,
             date: attendanceDate,
             status,
             remarks,
-            markedBy: teacherRecord?._id || null,
+            markedBy: user._id,
+            markedByRole: user.role,
           });
 
           await attendance.save();
@@ -211,24 +196,10 @@ export const updateAttendance = async (req, res) => {
 
     // If teacher, verify they are the assigned teacher
     if (user.role === "teacher") {
-      if (!user.profileId) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-      const teacherRecord = await Teacher.findById(user.profileId);
-      if (!teacherRecord) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-
       const schedule = await Schedule.findOne({
-        classId: attendance.classId,
-        subjectId: attendance.subjectId,
-        teacherId: teacherRecord._id,
+        classId: attendance.class,
+        subjectId: attendance.subject,
+        teacherId: user._id,
       });
 
       if (!schedule) {
@@ -237,28 +208,23 @@ export const updateAttendance = async (req, res) => {
           message: "You can only update attendance for your assigned classes",
         });
       }
-
-      attendance.markedBy = teacherRecord._id;
     }
 
     attendance.status = status;
     if (remarks !== undefined) {
       attendance.remarks = remarks;
     }
+    attendance.markedBy = user._id;
+    attendance.markedByRole = user.role;
 
     await attendance.save();
 
     const populatedAttendance = await Attendance.findById(attendance._id)
-      .populate({
-        path: "studentId",
-        populate: { path: "userId", select: "name email" },
-      })
-      .populate("classId", "name section")
-      .populate("subjectId", "name")
-      .populate({
-        path: "markedBy",
-        populate: { path: "userId", select: "name" },
-      });
+      .populate("student", "name email")
+      .populate("class", "name section")
+      .populate("subject", "name")
+      .populate("teacher", "name")
+      .populate("markedBy", "name");
 
     res.status(200).json({
       success: true,
@@ -292,23 +258,15 @@ export const getAttendanceByClassAndDate = async (req, res) => {
     }
 
     // Build query
-    const query = { classId: classId };
+    const query = { class: classId };
 
     if (subjectId) {
-      query.subjectId = subjectId;
+      query.subject = subjectId;
     }
 
     // If teacher, verify they teach this class
     if (user.role === "teacher") {
-      const teacherRecord = await Teacher.findOne({ userId: user._id });
-      if (!teacherRecord) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-
-      const scheduleQuery = { classId, teacherId: teacherRecord._id };
+      const scheduleQuery = { classId, teacherId: user._id };
       if (subjectId) {
         scheduleQuery.subjectId = subjectId;
       }
@@ -341,17 +299,12 @@ export const getAttendanceByClassAndDate = async (req, res) => {
     }
 
     const attendance = await Attendance.find(query)
-      .populate({
-        path: "studentId",
-        populate: { path: "userId", select: "name email" },
-      })
-      .populate("classId", "name section")
-      .populate("subjectId", "name")
-      .populate({
-        path: "markedBy",
-        populate: { path: "userId", select: "name" },
-      })
-      .sort({ date: -1 });
+      .populate("student", "name email")
+      .populate("class", "name section")
+      .populate("subject", "name")
+      .populate("teacher", "name")
+      .populate("markedBy", "name role")
+      .sort({ date: -1, student: 1 });
 
     res.status(200).json({
       success: true,
@@ -370,7 +323,7 @@ export const getAttendanceByClassAndDate = async (req, res) => {
 /**
  * Get attendance for a specific student
  * GET /api/attendance/student?studentId=xxx&startDate=xxx&endDate=xxx
- * Access: Student (own only), Parent (children only), Admin
+ * Access: Student (own only), Admin
  */
 export const getAttendanceByStudent = async (req, res) => {
   try {
@@ -381,45 +334,12 @@ export const getAttendanceByStudent = async (req, res) => {
 
     // Students can only view their own attendance
     if (user.role === "student") {
-      const studentRecord = await Student.findById(user.profileId);
-      if (!studentRecord) {
-        return res.status(404).json({
-          success: false,
-          message: "Student profile not found",
-        });
-      }
-      targetStudentId = studentRecord._id;
-    } else if (user.role === "admin" || user.role === "teacher") {
+      targetStudentId = user._id;
+    } else if (user.role === "admin") {
       if (!studentId) {
         return res.status(400).json({
           success: false,
           message: "Student ID is required",
-        });
-      }
-      targetStudentId = studentId;
-    } else if (user.role === "parent") {
-      // Parents can view their children's attendance
-      const Parent = (await import("../models/parent.model.js")).default;
-      const parentRecord = await Parent.findById(user.profileId);
-      if (!parentRecord) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent profile not found",
-        });
-      }
-
-      // Check if the requested student is one of parent's children
-      if (!studentId) {
-        return res.status(400).json({
-          success: false,
-          message: "Student ID is required",
-        });
-      }
-
-      if (!parentRecord.children.some((id) => id.toString() === studentId)) {
-        return res.status(403).json({
-          success: false,
-          message: "You can only view your children's attendance",
         });
       }
       targetStudentId = studentId;
@@ -430,7 +350,7 @@ export const getAttendanceByStudent = async (req, res) => {
       });
     }
 
-    const query = { studentId: targetStudentId };
+    const query = { student: targetStudentId };
 
     // Add date range filter
     if (startDate && endDate) {
@@ -442,32 +362,23 @@ export const getAttendanceByStudent = async (req, res) => {
 
     // Add subject filter
     if (subjectId) {
-      query.subjectId = subjectId;
+      query.subject = subjectId;
     }
 
     const attendance = await Attendance.find(query)
-      .populate({
-        path: "studentId",
-        populate: { path: "userId", select: "name email" },
-      })
-      .populate("classId", "name section")
-      .populate("subjectId", "name")
-      .populate({
-        path: "markedBy",
-        populate: { path: "userId", select: "name" },
-      })
+      .populate("student", "name email")
+      .populate("class", "name section")
+      .populate("subject", "name")
+      .populate("teacher", "name")
       .sort({ date: -1 });
 
     // Calculate statistics
     const totalClasses = attendance.length;
     const presentCount = attendance.filter(
-      (a) => a.status === "present",
+      (a) => a.status === "present"
     ).length;
     const absentCount = attendance.filter((a) => a.status === "absent").length;
     const lateCount = attendance.filter((a) => a.status === "late").length;
-    const excusedCount = attendance.filter(
-      (a) => a.status === "excused",
-    ).length;
     const attendancePercentage =
       totalClasses > 0
         ? (((presentCount + lateCount) / totalClasses) * 100).toFixed(2)
@@ -482,7 +393,6 @@ export const getAttendanceByStudent = async (req, res) => {
         present: presentCount,
         absent: absentCount,
         late: lateCount,
-        excused: excusedCount,
         attendancePercentage: parseFloat(attendancePercentage),
       },
     });
@@ -496,32 +406,39 @@ export const getAttendanceByStudent = async (req, res) => {
 };
 
 /**
- * Get attendance for logged-in student
- * GET /api/attendance/my
- * Access: Student only
+ * Get attendance for parent's child
+ * GET /api/attendance/child?childId=xxx&startDate=xxx&endDate=xxx
+ * Access: Parent
  */
-export const getMyAttendance = async (req, res) => {
+export const getAttendanceForChild = async (req, res) => {
   try {
+    const { childId, startDate, endDate, subjectId } = req.query;
     const user = req.user;
-    const { startDate, endDate, subjectId, classId } = req.query;
 
-    if (user.role !== "student") {
+    if (user.role !== "parent") {
       return res.status(403).json({
         success: false,
-        message: "This endpoint is for students only",
+        message: "Access denied. Only parents can access this endpoint",
       });
     }
 
-    // Get student record
-    const studentRecord = await Student.findOne({ userId: user._id });
-    if (!studentRecord) {
+    if (!childId) {
+      return res.status(400).json({
+        success: false,
+        message: "Child ID is required",
+      });
+    }
+
+    // Verify the child exists and is a student
+    const child = await User.findById(childId);
+    if (!child || child.role !== "student") {
       return res.status(404).json({
         success: false,
-        message: "Student profile not found",
+        message: "Student not found",
       });
     }
 
-    const query = { studentId: studentRecord._id };
+    const query = { student: childId };
 
     // Add date range filter
     if (startDate && endDate) {
@@ -533,33 +450,23 @@ export const getMyAttendance = async (req, res) => {
 
     // Add subject filter
     if (subjectId) {
-      query.subjectId = subjectId;
-    }
-
-    // Add class filter
-    if (classId) {
-      query.classId = classId;
+      query.subject = subjectId;
     }
 
     const attendance = await Attendance.find(query)
-      .populate("classId", "name section")
-      .populate("subjectId", "name code")
-      .populate({
-        path: "markedBy",
-        populate: { path: "userId", select: "name" },
-      })
+      .populate("student", "name email")
+      .populate("class", "name section")
+      .populate("subject", "name")
+      .populate("teacher", "name")
       .sort({ date: -1 });
 
     // Calculate statistics
     const totalClasses = attendance.length;
     const presentCount = attendance.filter(
-      (a) => a.status === "present",
+      (a) => a.status === "present"
     ).length;
     const absentCount = attendance.filter((a) => a.status === "absent").length;
     const lateCount = attendance.filter((a) => a.status === "late").length;
-    const excusedCount = attendance.filter(
-      (a) => a.status === "excused",
-    ).length;
     const attendancePercentage =
       totalClasses > 0
         ? (((presentCount + lateCount) / totalClasses) * 100).toFixed(2)
@@ -574,7 +481,6 @@ export const getMyAttendance = async (req, res) => {
         present: presentCount,
         absent: absentCount,
         late: lateCount,
-        excused: excusedCount,
         attendancePercentage: parseFloat(attendancePercentage),
       },
     });
@@ -582,6 +488,151 @@ export const getMyAttendance = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching attendance",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Get students for a class (for attendance marking)
+ * GET /api/attendance/students?classId=xxx
+ * Access: Admin, Teacher
+ */
+export const getStudentsForAttendance = async (req, res) => {
+  try {
+    const { classId, subjectId, date } = req.query;
+    const user = req.user;
+
+    if (!classId) {
+      return res.status(400).json({
+        success: false,
+        message: "Class ID is required",
+      });
+    }
+
+    // If teacher, verify assignment
+    if (user.role === "teacher" && subjectId) {
+      const schedule = await Schedule.findOne({
+        classId,
+        subjectId,
+        teacherId: user._id,
+      });
+
+      if (!schedule) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not assigned to this class/subject",
+        });
+      }
+    }
+
+    // Get all students (in a real app, you'd have a student-class mapping)
+    // For now, we'll get students who have been marked for this class
+    const students = await User.find({ role: "student" }).select(
+      "name email _id"
+    );
+
+    // If date and subject provided, get existing attendance
+    let attendanceMap = {};
+    if (date && subjectId) {
+      const searchDate = new Date(date);
+      searchDate.setHours(0, 0, 0, 0);
+      const nextDay = new Date(searchDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+
+      const existingAttendance = await Attendance.find({
+        class: classId,
+        subject: subjectId,
+        date: {
+          $gte: searchDate,
+          $lt: nextDay,
+        },
+      });
+
+      existingAttendance.forEach((att) => {
+        attendanceMap[att.student.toString()] = {
+          id: att._id,
+          status: att.status,
+          remarks: att.remarks,
+        };
+      });
+    }
+
+    // Merge students with attendance status
+    const studentsWithAttendance = students.map((student) => ({
+      _id: student._id,
+      name: student.name,
+      email: student.email,
+      attendance: attendanceMap[student._id.toString()] || null,
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: studentsWithAttendance.length,
+      data: studentsWithAttendance,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching students",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Get attendance summary/statistics
+ * GET /api/attendance/summary
+ * Access: Admin, Teacher
+ */
+export const getAttendanceSummary = async (req, res) => {
+  try {
+    const { classId, subjectId, studentId, startDate, endDate } = req.query;
+    const user = req.user;
+
+    const query = {};
+
+    if (classId) query.class = classId;
+    if (subjectId) query.subject = subjectId;
+    if (studentId) query.student = studentId;
+
+    // Teacher can only see their own classes
+    if (user.role === "teacher") {
+      query.teacher = user._id;
+    }
+
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    const attendance = await Attendance.find(query);
+
+    const summary = {
+      totalRecords: attendance.length,
+      present: attendance.filter((a) => a.status === "present").length,
+      absent: attendance.filter((a) => a.status === "absent").length,
+      late: attendance.filter((a) => a.status === "late").length,
+    };
+
+    summary.attendanceRate =
+      summary.totalRecords > 0
+        ? (
+            ((summary.present + summary.late) / summary.totalRecords) *
+            100
+          ).toFixed(2)
+        : 0;
+
+    res.status(200).json({
+      success: true,
+      data: summary,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching attendance summary",
       error: error.message,
     });
   }
@@ -596,15 +647,14 @@ export const deleteAttendance = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const attendance = await Attendance.findById(id);
+    const attendance = await Attendance.findByIdAndDelete(id);
+
     if (!attendance) {
       return res.status(404).json({
         success: false,
         message: "Attendance record not found",
       });
     }
-
-    await Attendance.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
@@ -617,122 +667,4 @@ export const deleteAttendance = async (req, res) => {
       error: error.message,
     });
   }
-};
-
-/**
- * Get attendance statistics for a class
- * GET /api/attendance/stats?classId=xxx&startDate=xxx&endDate=xxx
- * Access: Admin, Teacher
- */
-export const getAttendanceStats = async (req, res) => {
-  try {
-    const { classId, subjectId, startDate, endDate } = req.query;
-    const user = req.user;
-
-    if (!classId) {
-      return res.status(400).json({
-        success: false,
-        message: "Class ID is required",
-      });
-    }
-
-    // If teacher, verify they teach this class
-    if (user.role === "teacher") {
-      const teacherRecord = await Teacher.findOne({ userId: user._id });
-      if (!teacherRecord) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher profile not found",
-        });
-      }
-
-      const schedule = await Schedule.findOne({
-        classId,
-        teacherId: teacherRecord._id,
-      });
-
-      if (!schedule) {
-        return res.status(403).json({
-          success: false,
-          message: "You can only view statistics for your assigned classes",
-        });
-      }
-    }
-
-    // Build match query
-    const matchQuery = { classId: new mongoose.Types.ObjectId(classId) };
-
-    if (subjectId) {
-      matchQuery.subjectId = new mongoose.Types.ObjectId(subjectId);
-    }
-
-    if (startDate && endDate) {
-      matchQuery.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
-
-    // Aggregate attendance stats
-    const stats = await Attendance.aggregate([
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    // Get total students in class
-    const totalStudents = await Student.countDocuments({
-      classId,
-      enrollmentStatus: "active",
-    });
-
-    // Format stats
-    const formattedStats = {
-      present: 0,
-      absent: 0,
-      late: 0,
-      excused: 0,
-      total: 0,
-    };
-
-    stats.forEach((stat) => {
-      formattedStats[stat._id] = stat.count;
-      formattedStats.total += stat.count;
-    });
-
-    formattedStats.totalStudents = totalStudents;
-    formattedStats.attendancePercentage =
-      formattedStats.total > 0
-        ? (
-            ((formattedStats.present + formattedStats.late) /
-              formattedStats.total) *
-            100
-          ).toFixed(2)
-        : 0;
-
-    res.status(200).json({
-      success: true,
-      data: formattedStats,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching attendance statistics",
-      error: error.message,
-    });
-  }
-};
-
-export default {
-  markAttendance,
-  updateAttendance,
-  getAttendanceByClassAndDate,
-  getAttendanceByStudent,
-  getMyAttendance,
-  deleteAttendance,
-  getAttendanceStats,
 };
