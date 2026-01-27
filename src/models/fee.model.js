@@ -158,7 +158,6 @@ feeSchema.pre("save", function (next) {
     this.paymentStatus = "overdue";
   }
 
-  next();
 });
 
 // Index for efficient querying

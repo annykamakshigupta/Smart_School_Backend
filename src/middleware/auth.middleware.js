@@ -69,6 +69,8 @@ export const authenticate = async (req, res, next) => {
 export const authorize =
   (roles = []) =>
   (req, res, next) => {
+    const allowedRoles = Array.isArray(roles) ? roles : [roles];
+
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -76,7 +78,7 @@ export const authorize =
       });
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         message: "You do not have permission to access this resource",

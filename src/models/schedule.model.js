@@ -54,16 +54,11 @@ const scheduleSchema = new mongoose.Schema(
           "Thursday",
           "Friday",
           "Saturday",
+          "Sunday",
         ],
         message: "{VALUE} is not a valid day of week",
       },
       index: true,
-    },
-    // Period Number - Period index
-    periodNumber: {
-      type: Number,
-      min: 1,
-      default: null,
     },
     // Start Time - Period start
     startTime: {

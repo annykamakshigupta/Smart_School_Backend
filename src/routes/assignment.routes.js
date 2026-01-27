@@ -121,6 +121,42 @@ router.put(
   assignmentController.updateSubmission,
 );
 
+// ============= ADMIN ROUTES =============
+// Admin: Create assignment (on behalf of a teacher)
+router.post(
+  "/admin/assignments",
+  authorizeRoles("admin"),
+  assignmentController.adminCreateAssignment,
+);
+
+// Admin: Get all assignments
+router.get(
+  "/admin/assignments",
+  authorizeRoles("admin"),
+  assignmentController.getAdminAssignments,
+);
+
+// Admin: Get assignment by ID
+router.get(
+  "/admin/assignments/:id",
+  authorizeRoles("admin"),
+  assignmentController.adminGetAssignmentById,
+);
+
+// Admin: Update assignment
+router.put(
+  "/admin/assignments/:id",
+  authorizeRoles("admin"),
+  assignmentController.adminUpdateAssignment,
+);
+
+// Admin: Delete assignment
+router.delete(
+  "/admin/assignments/:id",
+  authorizeRoles("admin"),
+  assignmentController.adminDeleteAssignment,
+);
+
 // ============= SHARED/ADMIN ROUTES =============
 // Get submission by ID (for admin/viewing)
 router.get("/submissions/:id", assignmentController.getSubmissionById);

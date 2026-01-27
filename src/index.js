@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 import connectDB from "./config/db.js";
 import userRoutes from "./routes/user.routes.js";
 import scheduleRoutes from "./routes/schedule.routes.js";
@@ -11,10 +13,15 @@ import adminRoutes from "./routes/admin.routes.js";
 import assignmentRoutes from "./routes/assignment.routes.js";
 import resultRoutes from "./routes/result.routes.js";
 import feeRoutes from "./routes/fee.routes.js";
+import parentRoutes from "./routes/parent.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 
 dotenv.config();
 
 const app = express();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // CORS configuration
 const corsOptions = {
@@ -28,6 +35,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Serve uploaded files
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
 // Routes
 app.use("/api/auth", userRoutes);
 app.use("/api/users", userRoutes);
@@ -36,7 +46,9 @@ app.use("/api/classes", classRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/parents", parentRoutes);
 app.use("/api/assignments", assignmentRoutes);
+app.use("/api/upload", uploadRoutes);
 app.use("/api/results", resultRoutes);
 app.use("/api/fees", feeRoutes);
 

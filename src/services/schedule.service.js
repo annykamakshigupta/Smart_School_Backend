@@ -1,6 +1,100 @@
 import Schedule from "../models/schedule.model.js";
 import Subject from "../models/subject.model.js";
-import Teacher from "../models/teacher.model.js";
+import mongoose from "mongoose";
+
+const DAY_ORDER = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const toMinutes = (timeStr) => {
+  if (!timeStr || typeof timeStr !== "string") return Number.POSITIVE_INFINITY;
+  const [hRaw, mRaw] = timeStr.split(":");
+  const hours = Number(hRaw);
+  const minutes = Number(mRaw);
+  if (Number.isNaN(hours) || Number.isNaN(minutes))
+    return Number.POSITIVE_INFINITY;
+  return hours * 60 + minutes;
+};
+
+const groupByDay = (items) => {
+  const grouped = DAY_ORDER.reduce((acc, day) => {
+    acc[day] = [];
+    return acc;
+  }, {});
+
+  for (const item of items) {
+    if (!item?.dayOfWeek) continue;
+    if (!grouped[item.dayOfWeek]) grouped[item.dayOfWeek] = [];
+    grouped[item.dayOfWeek].push(item);
+  }
+
+  for (const day of Object.keys(grouped)) {
+    grouped[day].sort(
+      (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime),
+    );
+  }
+
+  return grouped;
+};
+
+const normalizeObjectId = (value, fieldName) => {
+  if (!value) return null;
+  if (value instanceof mongoose.Types.ObjectId) return value;
+  if (typeof value === "string" && mongoose.Types.ObjectId.isValid(value)) {
+    return new mongoose.Types.ObjectId(value);
+  }
+  const error = new Error(`${fieldName} must be a valid ObjectId`);
+  error.statusCode = 400;
+  throw error;
+};
+
+const toScheduleDTO = (doc) => {
+  const classObj = doc.classId
+    ? {
+        _id: doc.classId._id,
+        name: doc.classId.name,
+        section: doc.classId.section,
+        academicYear: doc.classId.academicYear,
+      }
+    : null;
+
+  const subjectObj = doc.subjectId
+    ? {
+        _id: doc.subjectId._id,
+        name: doc.subjectId.name,
+        code: doc.subjectId.code,
+      }
+    : null;
+
+  const teacherName =
+    doc.teacherId?.userId?.name || doc.teacherId?.name || null;
+
+  const teacherObj = doc.teacherId
+    ? { _id: doc.teacherId._id, name: teacherName }
+    : null;
+
+  return {
+    _id: doc._id,
+    dayOfWeek: doc.dayOfWeek,
+    startTime: doc.startTime,
+    endTime: doc.endTime,
+    room: doc.room,
+    academicYear: doc.academicYear,
+    section: doc.section,
+    isActive: doc.isActive,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    classId: classObj,
+    subjectId: subjectObj,
+    teacherId: teacherObj,
+  };
+};
 
 class ScheduleService {
   /**
@@ -149,10 +243,10 @@ class ScheduleService {
       .populate("subjectId", "name code")
       .populate({
         path: "teacherId",
-        select: "employeeCode qualification",
+        select: "userId",
         populate: {
           path: "userId",
-          select: "name email phone",
+          select: "name",
         },
       });
   }
@@ -164,30 +258,47 @@ class ScheduleService {
     const query = { isActive: true };
 
     // Apply filters
-    if (filters.classId) query.classId = filters.classId;
-    if (filters.section) query.section = filters.section;
-    if (filters.teacherId) query.teacherId = filters.teacherId;
+    if (filters.classId)
+      query.classId = normalizeObjectId(filters.classId, "classId");
+    if (filters.section)
+      query.section = String(filters.section).trim().toUpperCase();
+    if (filters.teacherId)
+      query.teacherId = normalizeObjectId(filters.teacherId, "teacherId");
     if (filters.dayOfWeek) query.dayOfWeek = filters.dayOfWeek;
     // Only filter by academicYear if explicitly provided
     if (filters.academicYear) query.academicYear = filters.academicYear;
-
 
     const schedules = await Schedule.find(query)
       .populate("classId", "name section academicYear")
       .populate("subjectId", "name code")
       .populate({
         path: "teacherId",
-        select: "employeeCode qualification",
+        select: "userId",
         populate: {
           path: "userId",
-          select: "name email phone",
+          select: "name",
         },
       })
-      .sort({ dayOfWeek: 1, startTime: 1 });
+      .sort({ createdAt: -1 });
 
+    // Robust sort: day order + time order (handles non-zero-padded times)
+    const sorted = schedules.slice().sort((a, b) => {
+      const dayA = DAY_ORDER.indexOf(a.dayOfWeek);
+      const dayB = DAY_ORDER.indexOf(b.dayOfWeek);
+      if (dayA !== dayB) return dayA - dayB;
+      return toMinutes(a.startTime) - toMinutes(b.startTime);
+    });
 
+    return sorted;
+  }
 
-    return schedules;
+  async getSchedulesUiReady(filters = {}) {
+    const schedules = await this.getSchedules(filters);
+    const items = schedules.map(toScheduleDTO);
+    return {
+      items,
+      groupedByDay: groupByDay(items),
+    };
   }
 
   /**
@@ -199,10 +310,10 @@ class ScheduleService {
       .populate("subjectId", "name code")
       .populate({
         path: "teacherId",
-        select: "employeeCode qualification",
+        select: "userId",
         populate: {
           path: "userId",
-          select: "name email phone",
+          select: "name",
         },
       });
 
@@ -258,10 +369,10 @@ class ScheduleService {
       .populate("subjectId", "name code")
       .populate({
         path: "teacherId",
-        select: "employeeCode qualification",
+        select: "userId",
         populate: {
           path: "userId",
-          select: "name email phone",
+          select: "name",
         },
       });
   }
@@ -288,57 +399,26 @@ class ScheduleService {
    * Get weekly schedule for a class
    */
   async getWeeklyScheduleForClass(classId, section, academicYear) {
-    const schedules = await this.getSchedules({
+    const { groupedByDay } = await this.getSchedulesUiReady({
       classId,
       section,
       academicYear,
     });
-
-    // Organize by day
-    const weeklySchedule = {
-      Monday: [],
-      Tuesday: [],
-      Wednesday: [],
-      Thursday: [],
-      Friday: [],
-    };
-
-    schedules.forEach((schedule) => {
-      weeklySchedule[schedule.dayOfWeek].push(schedule);
-    });
-
-    return weeklySchedule;
+    return groupedByDay;
   }
 
   /**
    * Get weekly schedule for a teacher
    */
   async getWeeklyScheduleForTeacher(teacherId, academicYear) {
-
     // Only include academicYear in filters if it's provided
     const filters = { teacherId };
     if (academicYear) {
       filters.academicYear = academicYear;
     }
 
-    const schedules = await this.getSchedules(filters);
-
-
-
-    // Organize by day
-    const weeklySchedule = {
-      Monday: [],
-      Tuesday: [],
-      Wednesday: [],
-      Thursday: [],
-      Friday: [],
-    };
-
-    schedules.forEach((schedule) => {
-      weeklySchedule[schedule.dayOfWeek].push(schedule);
-    });
-
-    return weeklySchedule;
+    const { groupedByDay } = await this.getSchedulesUiReady(filters);
+    return groupedByDay;
   }
 }
 

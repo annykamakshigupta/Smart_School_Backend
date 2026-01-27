@@ -103,8 +103,18 @@ class SubmissionService {
   }
 
   // Get all submissions for an assignment (teacher view)
-  async getAssignmentSubmissions(assignmentId, filters = {}) {
+  async getAssignmentSubmissions(assignmentId, teacherUserId, filters = {}) {
     try {
+      // Verify teacher owns this assignment
+      const assignment =
+        await Assignment.findById(assignmentId).select("teacher");
+      if (!assignment) {
+        throw new Error("Assignment not found");
+      }
+      if (assignment.teacher.toString() !== teacherUserId.toString()) {
+        throw new Error("Unauthorized to view submissions for this assignment");
+      }
+
       const query = { assignment: assignmentId };
 
       // Apply filters
@@ -268,13 +278,20 @@ class SubmissionService {
   }
 
   // Get students who haven't submitted
-  async getNonSubmitters(assignmentId) {
+  async getNonSubmitters(assignmentId, teacherUserId) {
     try {
-      const assignment =
-        await Assignment.findById(assignmentId).populate("class");
+      const assignment = await Assignment.findById(assignmentId)
+        .select("teacher class")
+        .populate("class");
 
       if (!assignment) {
         throw new Error("Assignment not found");
+      }
+
+      if (assignment.teacher.toString() !== teacherUserId.toString()) {
+        throw new Error(
+          "Unauthorized to view non-submitters for this assignment",
+        );
       }
 
       // Get all students in the class

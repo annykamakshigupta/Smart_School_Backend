@@ -1,5 +1,6 @@
 import assignmentService from "../services/assignment.service.js";
 import submissionService from "../services/submission.service.js";
+import User from "../models/user.model.js";
 
 class AssignmentController {
   // Teacher: Create new assignment
@@ -10,8 +11,14 @@ class AssignmentController {
         teacher: req.user._id,
       };
 
-      const assignment =
-        await assignmentService.createAssignment(assignmentData);
+      const assignment = await assignmentService.createAssignment(
+        assignmentData,
+        {
+          actorRole: "teacher",
+          teacherUserId: req.user._id,
+          teacherProfileId: req.user.profileId,
+        },
+      );
 
       res.status(201).json({
         success: true,
@@ -186,6 +193,7 @@ class AssignmentController {
 
       const result = await submissionService.getAssignmentSubmissions(
         req.params.id,
+        req.user._id,
         filters,
       );
 
@@ -207,6 +215,7 @@ class AssignmentController {
     try {
       const nonSubmitters = await submissionService.getNonSubmitters(
         req.params.id,
+        req.user._id,
       );
 
       res.status(200).json({
@@ -352,6 +361,146 @@ class AssignmentController {
       res.status(200).json({
         success: true,
         data: stats,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Admin: Get all assignments
+  async getAdminAssignments(req, res) {
+    try {
+      const filters = {
+        status: req.query.status,
+        class: req.query.class,
+        subject: req.query.subject,
+        teacher: req.query.teacher,
+        dateFrom: req.query.dateFrom,
+        dateTo: req.query.dateTo,
+        search: req.query.search,
+        page: req.query.page,
+        limit: req.query.limit,
+      };
+
+      const result = await assignmentService.getAdminAssignments(filters);
+
+      res.status(200).json({
+        success: true,
+        data: result.assignments,
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Admin: Create assignment on behalf of teacher
+  async adminCreateAssignment(req, res) {
+    try {
+      const teacherUserId = req.body.teacher;
+      if (!teacherUserId) {
+        return res.status(400).json({
+          success: false,
+          message: "Teacher (user id) is required",
+        });
+      }
+
+      const teacherUser =
+        await User.findById(teacherUserId).select("_id role profileId");
+
+      if (!teacherUser || teacherUser.role !== "teacher") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid teacher user",
+        });
+      }
+
+      const assignmentData = {
+        ...req.body,
+        teacher: teacherUserId,
+      };
+
+      const assignment = await assignmentService.createAssignment(
+        assignmentData,
+        {
+          actorRole: "admin",
+          teacherUserId: teacherUserId,
+          teacherProfileId: teacherUser.profileId,
+        },
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Assignment created successfully",
+        data: assignment,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Admin: Get assignment by ID
+  async adminGetAssignmentById(req, res) {
+    try {
+      const assignment = await assignmentService.getAssignmentById(
+        req.params.id,
+        req.user._id,
+        "admin",
+      );
+
+      res.status(200).json({
+        success: true,
+        data: assignment,
+      });
+    } catch (error) {
+      res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Admin: Update assignment
+  async adminUpdateAssignment(req, res) {
+    try {
+      const assignment = await assignmentService.adminUpdateAssignment(
+        req.params.id,
+        req.body,
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Assignment updated successfully",
+        data: assignment,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Admin: Delete assignment
+  async adminDeleteAssignment(req, res) {
+    try {
+      const result = await assignmentService.adminDeleteAssignment(
+        req.params.id,
+      );
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result,
       });
     } catch (error) {
       res.status(400).json({

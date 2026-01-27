@@ -1,7 +1,29 @@
 import scheduleService from "../services/schedule.service.js";
 import Teacher from "../models/teacher.model.js";
 import Student from "../models/student.model.js";
+import Parent from "../models/parent.model.js";
 import mongoose from "mongoose";
+
+const getDefaultAcademicYear = () => {
+  const currentYear = new Date().getFullYear();
+  return `${currentYear}-${currentYear + 1}`;
+};
+
+const DAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const emptyGroupedByDay = () =>
+  DAYS.reduce((acc, day) => {
+    acc[day] = [];
+    return acc;
+  }, {});
 
 /**
  * Create a new schedule entry
@@ -40,48 +62,261 @@ export const createSchedule = async (req, res) => {
  */
 export const getSchedules = async (req, res) => {
   try {
-    const filters = {};
-    const userRole = req.user.role;
+    // Backwards-compatible endpoint:
+    // - Admin: behaves like admin schedules list (with optional filters)
+    // - Teacher/Student/Parent: behaves like their own schedule endpoint
 
-    // Apply role-based filtering
-    if (userRole === "teacher") {
-      // Use profileId directly
-      if (req.user.profileId) {
-        filters.teacherId = req.user.profileId;
-      }
-    } else if (userRole === "student") {
-      // Get student profile to get classId and section
-      if (req.user.profileId) {
-        const student = await Student.findById(req.user.profileId);
-        if (student) {
-          filters.classId = student.classId;
-          filters.section = student.section;
-        }
-      }
-    } else if (userRole === "parent") {
-      // Parents should see their children's schedules via query params
-      // Additional logic would be needed to fetch children's class info
+    if (req.user.role === "admin") {
+      return await getAdminSchedules(req, res);
+    }
+    if (req.user.role === "teacher") {
+      return await getTeacherSchedulesForMe(req, res);
+    }
+    if (req.user.role === "student") {
+      return await getStudentSchedulesForMe(req, res);
+    }
+    if (req.user.role === "parent") {
+      return await getParentSchedulesForMe(req, res);
     }
 
-    // Allow query parameters for additional filtering
-    if (req.query.classId) filters.classId = req.query.classId;
-    if (req.query.section) filters.section = req.query.section;
-    if (req.query.teacherId && userRole === "admin")
-      filters.teacherId = req.query.teacherId;
-    if (req.query.dayOfWeek) filters.dayOfWeek = req.query.dayOfWeek;
-    if (req.query.academicYear) filters.academicYear = req.query.academicYear;
-
-    const schedules = await scheduleService.getSchedules(filters);
-
-    res.status(200).json({
-      success: true,
-      count: schedules.length,
-      data: schedules,
+    return res.status(403).json({
+      success: false,
+      message: "Unsupported role",
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch schedules",
+    });
+  }
+};
+
+/**
+ * Admin: fetch all schedules with filters
+ * @route GET /api/schedules/admin
+ */
+export const getAdminSchedules = async (req, res) => {
+  try {
+    const filters = {};
+    if (req.query.classId) filters.classId = req.query.classId;
+    if (req.query.section) filters.section = req.query.section;
+    if (req.query.teacherId) filters.teacherId = req.query.teacherId;
+    if (req.query.dayOfWeek) filters.dayOfWeek = req.query.dayOfWeek;
+    if (req.query.academicYear) filters.academicYear = req.query.academicYear;
+
+    const result = await scheduleService.getSchedulesUiReady(filters);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to fetch schedules",
+    });
+  }
+};
+
+/**
+ * Teacher: fetch schedules for logged in teacher (profileId)
+ * @route GET /api/schedules/teacher
+ */
+export const getTeacherSchedulesForMe = async (req, res) => {
+  try {
+    const teacherProfileId = req.user.profileId;
+    if (!teacherProfileId) {
+      return res.status(400).json({
+        success: false,
+        message: "Teacher profileId missing on user",
+      });
+    }
+
+    const teacher = await Teacher.findById(teacherProfileId).populate(
+      "userId",
+      "name",
+    );
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: "Teacher profile not found",
+      });
+    }
+
+    const filters = {
+      teacherId: teacher._id,
+    };
+    if (req.query.dayOfWeek) filters.dayOfWeek = req.query.dayOfWeek;
+    if (req.query.academicYear) filters.academicYear = req.query.academicYear;
+
+    const result = await scheduleService.getSchedulesUiReady(filters);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...result,
+        meta: {
+          teacher: { _id: teacher._id, name: teacher.userId?.name || null },
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to fetch teacher schedules",
+    });
+  }
+};
+
+/**
+ * Student: fetch schedules for logged in student's class/section/year
+ * @route GET /api/schedules/student
+ */
+export const getStudentSchedulesForMe = async (req, res) => {
+  try {
+    const studentProfileId = req.user.profileId;
+    if (!studentProfileId) {
+      return res.status(400).json({
+        success: false,
+        message: "Student profileId missing on user",
+      });
+    }
+
+    const student = await Student.findById(studentProfileId)
+      .populate("userId", "name")
+      .populate("classId", "name section academicYear");
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found",
+      });
+    }
+
+    if (!student.classId || !student.section || !student.academicYear) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          items: [],
+          groupedByDay: emptyGroupedByDay(),
+          meta: {
+            student: { _id: student._id, name: student.userId?.name || null },
+          },
+        },
+      });
+    }
+
+    const result = await scheduleService.getSchedulesUiReady({
+      classId: student.classId._id,
+      section: student.section,
+      academicYear: student.academicYear,
+      ...(req.query.dayOfWeek ? { dayOfWeek: req.query.dayOfWeek } : {}),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...result,
+        meta: {
+          student: { _id: student._id, name: student.userId?.name || null },
+          class: student.classId
+            ? {
+                _id: student.classId._id,
+                name: student.classId.name,
+                section: student.section,
+                academicYear: student.academicYear,
+              }
+            : null,
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to fetch student schedule",
+    });
+  }
+};
+
+/**
+ * Parent: fetch schedules for each linked child
+ * @route GET /api/schedules/parent
+ */
+export const getParentSchedulesForMe = async (req, res) => {
+  try {
+    const parentProfileId = req.user.profileId;
+    if (!parentProfileId) {
+      return res.status(400).json({
+        success: false,
+        message: "Parent profileId missing on user",
+      });
+    }
+
+    const parent = await Parent.findById(parentProfileId).populate({
+      path: "children",
+      populate: [
+        { path: "userId", select: "name" },
+        { path: "classId", select: "name section academicYear" },
+      ],
+    });
+
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent profile not found",
+      });
+    }
+
+    const children = parent.children || [];
+    const childrenSchedules = [];
+
+    for (const child of children) {
+      if (!child?.classId || !child?.section || !child?.academicYear) {
+        childrenSchedules.push({
+          student: {
+            _id: child?._id,
+            name: child?.userId?.name || null,
+            classId: child?.classId?._id || null,
+            className: child?.classId?.name || null,
+            section: child?.section || null,
+            academicYear: child?.academicYear || null,
+          },
+          items: [],
+          groupedByDay: emptyGroupedByDay(),
+        });
+        continue;
+      }
+
+      const result = await scheduleService.getSchedulesUiReady({
+        classId: child.classId._id,
+        section: child.section,
+        academicYear: child.academicYear,
+        ...(req.query.dayOfWeek ? { dayOfWeek: req.query.dayOfWeek } : {}),
+      });
+
+      childrenSchedules.push({
+        student: {
+          _id: child._id,
+          name: child.userId?.name || null,
+          classId: child.classId._id,
+          className: child.classId?.name || null,
+          section: child.section,
+          academicYear: child.academicYear,
+        },
+        ...result,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        children: childrenSchedules,
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to fetch parent schedules",
     });
   }
 };
@@ -213,8 +448,8 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
 
     // Only allow teachers to view their own schedule (unless admin)
     if (req.user.role === "teacher") {
-      const teacher = await Teacher.findOne({ userId: req.user._id });
-      if (!teacher || teacher._id.toString() !== teacherId) {
+      const teacherProfileId = req.user.profileId;
+      if (!teacherProfileId || teacherProfileId.toString() !== teacherId) {
         return res.status(403).json({
           success: false,
           message: "You can only view your own schedule",
@@ -246,8 +481,10 @@ export const getWeeklyScheduleForTeacher = async (req, res) => {
  */
 export const getTeacherSchedule = async (req, res) => {
   try {
-    // Get teacher profile from userId
-    const teacher = await Teacher.findOne({ userId: req.user._id });
+    // Get teacher profile from profileId (strict flow)
+    const teacher = req.user.profileId
+      ? await Teacher.findById(req.user.profileId)
+      : null;
     if (!teacher) {
       return res.status(404).json({
         success: false,

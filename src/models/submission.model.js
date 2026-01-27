@@ -92,7 +92,6 @@ submissionSchema.pre("save", async function (next) {
       this.status = "late";
     }
   }
-  next();
 });
 
 const Submission = mongoose.model("Submission", submissionSchema);

@@ -2,11 +2,19 @@ import Assignment from "../models/assignment.model.js";
 import Submission from "../models/submission.model.js";
 import Class from "../models/class.model.js";
 import Subject from "../models/subject.model.js";
+import Teacher from "../models/teacher.model.js";
 
 class AssignmentService {
   // Create new assignment
-  async createAssignment(assignmentData) {
+  async createAssignment(assignmentData, options = {}) {
     try {
+      const teacherUserId = options.teacherUserId || assignmentData.teacher;
+      const teacherProfileId = options.teacherProfileId || null;
+
+      if (!teacherUserId) {
+        throw new Error("Teacher is required");
+      }
+
       // Validate class exists
       const classExists = await Class.findById(assignmentData.class);
       if (!classExists) {
@@ -19,12 +27,63 @@ class AssignmentService {
         throw new Error("Subject not found");
       }
 
+      // Validate subject belongs to class when subject.classId is defined
+      if (
+        subjectExists.classId &&
+        subjectExists.classId.toString() !== classExists._id.toString()
+      ) {
+        throw new Error(
+          "Selected subject does not belong to the selected class",
+        );
+      }
+
+      // Validate teacher is allowed to post for this class/subject (teacher routes and admin-on-behalf)
+      if (teacherProfileId) {
+        const teacherProfile = await Teacher.findById(teacherProfileId).select(
+          "assignedSubjects assignedClasses",
+        );
+
+        if (!teacherProfile) {
+          throw new Error("Teacher profile not found");
+        }
+
+        const isSubjectTeacher =
+          subjectExists.assignedTeacher &&
+          subjectExists.assignedTeacher.toString() ===
+            teacherProfileId.toString();
+
+        const isClassTeacher =
+          classExists.classTeacher &&
+          classExists.classTeacher.toString() === teacherProfileId.toString();
+
+        const isAssignedSubject = teacherProfile.assignedSubjects
+          .map((id) => id.toString())
+          .includes(subjectExists._id.toString());
+
+        const isAssignedClass = teacherProfile.assignedClasses
+          .map((id) => id.toString())
+          .includes(classExists._id.toString());
+
+        if (
+          !(
+            isSubjectTeacher ||
+            isClassTeacher ||
+            (isAssignedSubject && isAssignedClass)
+          )
+        ) {
+          throw new Error("Teacher is not assigned to this class/subject");
+        }
+      }
+
       // Validate due date is in future
       if (new Date(assignmentData.dueDate) <= new Date()) {
         throw new Error("Due date must be in the future");
       }
 
-      const assignment = await Assignment.create(assignmentData);
+      const assignment = await Assignment.create({
+        ...assignmentData,
+        teacher: teacherUserId,
+      });
 
       return await Assignment.findById(assignment._id)
         .populate("teacher", "name email")
@@ -204,6 +263,27 @@ class AssignmentService {
         throw new Error("Assignment not found");
       }
 
+      // Teacher access control
+      if (role === "teacher" && userId) {
+        if (assignment.teacher?._id?.toString() !== userId.toString()) {
+          throw new Error("Unauthorized to access this assignment");
+        }
+      }
+
+      // Student access control (must belong to student's class)
+      if (role === "student" && userId) {
+        const Student = (await import("../models/student.model.js")).default;
+        const student = await Student.findOne({ userId }).select("classId");
+
+        if (!student || !student.classId) {
+          throw new Error("Student profile not found");
+        }
+
+        if (assignment.class?._id?.toString() !== student.classId.toString()) {
+          throw new Error("Unauthorized to access this assignment");
+        }
+      }
+
       // If student, include their submission
       if (role === "student" && userId) {
         const submission = await Submission.findOne({
@@ -238,6 +318,108 @@ class AssignmentService {
       }
 
       return assignment;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Admin: list all assignments
+  async getAdminAssignments(filters = {}) {
+    try {
+      const query = { isActive: true };
+
+      if (filters.status) query.status = filters.status;
+      if (filters.class) query.class = filters.class;
+      if (filters.subject) query.subject = filters.subject;
+      if (filters.teacher) query.teacher = filters.teacher;
+
+      if (filters.dateFrom || filters.dateTo) {
+        query.dueDate = {};
+        if (filters.dateFrom) query.dueDate.$gte = new Date(filters.dateFrom);
+        if (filters.dateTo) query.dueDate.$lte = new Date(filters.dateTo);
+      }
+
+      if (filters.search) {
+        query.title = { $regex: filters.search, $options: "i" };
+      }
+
+      const page = parseInt(filters.page) || 1;
+      const limit = parseInt(filters.limit) || 20;
+      const skip = (page - 1) * limit;
+
+      const assignments = await Assignment.find(query)
+        .populate("teacher", "name email")
+        .populate("subject", "name code")
+        .populate("class", "name section academicYear")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
+      const total = await Assignment.countDocuments(query);
+
+      return {
+        assignments,
+        pagination: {
+          total,
+          page,
+          pages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Admin: update any assignment
+  async adminUpdateAssignment(assignmentId, updateData) {
+    try {
+      // Validate due date if being updated
+      if (updateData.dueDate && new Date(updateData.dueDate) <= new Date()) {
+        throw new Error("Due date must be in the future");
+      }
+
+      const updatedAssignment = await Assignment.findByIdAndUpdate(
+        assignmentId,
+        updateData,
+        { new: true, runValidators: true },
+      )
+        .populate("teacher", "name email")
+        .populate("subject", "name code")
+        .populate("class", "name section academicYear");
+
+      if (!updatedAssignment) {
+        throw new Error("Assignment not found");
+      }
+
+      return updatedAssignment;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Admin: delete any assignment (reuse soft delete rules)
+  async adminDeleteAssignment(assignmentId) {
+    try {
+      const assignment = await Assignment.findById(assignmentId);
+      if (!assignment) {
+        throw new Error("Assignment not found");
+      }
+
+      const submissionCount = await Submission.countDocuments({
+        assignment: assignmentId,
+      });
+
+      if (submissionCount > 0) {
+        assignment.isActive = false;
+        await assignment.save();
+        return {
+          message: "Assignment deactivated (has submissions)",
+          deleted: false,
+        };
+      }
+
+      await Assignment.findByIdAndDelete(assignmentId);
+      return { message: "Assignment deleted permanently", deleted: true };
     } catch (error) {
       throw error;
     }

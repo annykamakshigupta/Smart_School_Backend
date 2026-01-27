@@ -9,6 +9,27 @@ router.use(authenticate);
 
 // Specific routes MUST come before parameterized routes like /:id
 
+// Role-based UI-ready schedule endpoints
+router.get("/admin", authorize("admin"), scheduleController.getAdminSchedules);
+
+router.get(
+  "/teacher",
+  authorize("teacher"),
+  scheduleController.getTeacherSchedulesForMe,
+);
+
+router.get(
+  "/student",
+  authorize("student"),
+  scheduleController.getStudentSchedulesForMe,
+);
+
+router.get(
+  "/parent",
+  authorize("parent"),
+  scheduleController.getParentSchedulesForMe,
+);
+
 // Teacher-specific route for authenticated teacher's own schedule
 router.get(
   "/my-schedule",
