@@ -184,6 +184,85 @@ export const markAttendance = async (req, res) => {
 };
 
 /**
+ * Get students for attendance marking
+ * GET /api/attendance/students?classId=<id>&subjectId=<id>
+ * Access: Admin, Teacher
+ */
+export const getStudentsForAttendance = async (req, res) => {
+  try {
+    const { classId, subjectId } = req.query;
+    const user = req.user;
+
+    if (!classId) {
+      return res.status(400).json({
+        success: false,
+        message: "classId is required",
+      });
+    }
+
+    const classDoc = await Class.findById(classId).select("_id classTeacher");
+    if (!classDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Class not found",
+      });
+    }
+
+    // If teacher, verify they are assigned to this class (+ subject if provided)
+    if (user.role === "teacher") {
+      if (!user.profileId) {
+        return res.status(403).json({
+          success: false,
+          message: "Teacher profile not found",
+        });
+      }
+
+      const teacherId = String(user.profileId);
+      const isClassTeacher =
+        classDoc.classTeacher && String(classDoc.classTeacher) === teacherId;
+
+      if (!isClassTeacher) {
+        const scheduleQuery = {
+          classId,
+          teacherId: user.profileId,
+        };
+
+        if (subjectId) {
+          scheduleQuery.subjectId = subjectId;
+        }
+
+        const schedule = await Schedule.findOne(scheduleQuery).select("_id");
+        if (!schedule) {
+          return res.status(403).json({
+            success: false,
+            message: "You are not assigned to this class/subject",
+          });
+        }
+      }
+    }
+
+    const students = await Student.find({
+      classId,
+      enrollmentStatus: "active",
+    })
+      .populate("userId", "name email phone")
+      .sort({ rollNumber: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: students.length,
+      data: students,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching students",
+      error: error.message,
+    });
+  }
+};
+
+/**
  * Update attendance record
  * PUT /api/attendance/:id
  * Access: Admin, Teacher (own class only)

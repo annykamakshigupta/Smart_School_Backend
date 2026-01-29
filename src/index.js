@@ -15,6 +15,7 @@ import resultRoutes from "./routes/result.routes.js";
 import feeRoutes from "./routes/fee.routes.js";
 import parentRoutes from "./routes/parent.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
+import teacherRoutes from "./routes/teacher.routes.js";
 
 dotenv.config();
 
@@ -46,6 +47,7 @@ app.use("/api/classes", classRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/teachers", teacherRoutes);
 app.use("/api/parents", parentRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/upload", uploadRoutes);

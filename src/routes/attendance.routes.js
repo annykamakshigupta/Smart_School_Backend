@@ -2,6 +2,7 @@ import express from "express";
 import {
   markAttendance,
   updateAttendance,
+  getStudentsForAttendance,
   getAttendanceByClassAndDate,
   getAttendanceByStudent,
   getMyAttendance,
@@ -37,6 +38,14 @@ router.get(
   authenticate,
   authorize(["admin", "teacher"]),
   getAttendanceByClassAndDate,
+);
+
+// Get students for attendance marking (Admin, Teacher)
+router.get(
+  "/students",
+  authenticate,
+  authorize(["admin", "teacher"]),
+  getStudentsForAttendance,
 );
 
 // Get attendance statistics (Admin, Teacher)
