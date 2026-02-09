@@ -1,47 +1,105 @@
 import express from "express";
 import {
+  // Fee Structures
+  createFeeStructure,
+  getAllFeeStructures,
+  updateFeeStructure,
+  deleteFeeStructure,
+  toggleFeeStructure,
+  // Fee Assignment
+  assignFeesToClass,
+  // Fee CRUD
   createFee,
   createBulkFees,
   getAllFees,
   getFeesByStudent,
   getMyFees,
+  // Payments
   recordPayment,
+  parentPayment,
+  getPaymentHistory,
+  getAllPayments,
+  // Update / Delete
   updateFee,
   deleteFee,
+  // Analytics
   getFeeStats,
+  getReceipt,
 } from "../controllers/fee.controller.js";
 import { authenticate, authorize } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-// Protect all routes
+// All routes require authentication
 router.use(authenticate);
 
-// Create a fee (Admin only)
+// ═══════════════════════════════════════
+// ADMIN ROUTES
+// ═══════════════════════════════════════
+
+// Fee Structures
+router.post("/structures", authorize(["admin"]), createFeeStructure);
+router.get("/structures", authorize(["admin"]), getAllFeeStructures);
+router.put("/structures/:id", authorize(["admin"]), updateFeeStructure);
+router.delete("/structures/:id", authorize(["admin"]), deleteFeeStructure);
+router.patch(
+  "/structures/:id/toggle",
+  authorize(["admin"]),
+  toggleFeeStructure,
+);
+
+// Fee Assignment
+router.post("/assign", authorize(["admin"]), assignFeesToClass);
+
+// Fee CRUD (Admin)
 router.post("/", authorize(["admin"]), createFee);
-
-// Create bulk fees (Admin only)
 router.post("/bulk", authorize(["admin"]), createBulkFees);
-
-// Get all fees (Admin only)
 router.get("/", authorize(["admin"]), getAllFees);
 
-// Get fee statistics (Admin only)
+// Analytics (Admin)
 router.get("/stats/summary", authorize(["admin"]), getFeeStats);
 
-// Get my fees (Student only)
-router.get("/my", authorize(["student"]), getMyFees);
-
-// Get fees by student (Admin, Student-own, Parent-children)
-router.get("/student/:studentId", getFeesByStudent);
-
-// Record payment (Admin only)
+// Payments (Admin)
+router.get("/payments/all", authorize(["admin"]), getAllPayments);
 router.post("/:id/pay", authorize(["admin"]), recordPayment);
 
-// Update a fee (Admin only)
+// Update / Delete Fee (Admin)
 router.put("/:id", authorize(["admin"]), updateFee);
-
-// Delete a fee (Admin only)
 router.delete("/:id", authorize(["admin"]), deleteFee);
+
+// ═══════════════════════════════════════
+// STUDENT ROUTES
+// ═══════════════════════════════════════
+
+// Get my fees (Student)
+router.get("/my", authorize(["student"]), getMyFees);
+
+// ═══════════════════════════════════════
+// PARENT ROUTES
+// ═══════════════════════════════════════
+
+// Parent payment
+router.post("/:id/parent-pay", authorize(["parent"]), parentPayment);
+
+// ═══════════════════════════════════════
+// SHARED ROUTES (ADMIN + PARENT + STUDENT)
+// ═══════════════════════════════════════
+
+// Get fees by student (Admin, Student-own, Parent-children)
+router.get(
+  "/student/:studentId",
+  authorize(["admin", "parent", "student"]),
+  getFeesByStudent,
+);
+
+// Payment history
+router.get(
+  "/payments/:studentId",
+  authorize(["admin", "parent", "student"]),
+  getPaymentHistory,
+);
+
+// Receipt
+router.get("/receipt/:paymentId", authorize(["admin", "parent"]), getReceipt);
 
 export default router;
