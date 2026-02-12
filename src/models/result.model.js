@@ -2,32 +2,34 @@ import mongoose from "mongoose";
 
 /**
  * Result Model (Marks)
- * Purpose: Stores academic performance.
+ * Purpose: Stores academic performance per student per subject per exam.
  */
 const resultSchema = new mongoose.Schema(
   {
-    // Student ID - Student reference
+    examId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Exam",
+      default: null,
+      index: true,
+    },
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Student",
       required: [true, "Student is required"],
       index: true,
     },
-    // Subject ID - Subject reference
     subjectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
       required: [true, "Subject is required"],
       index: true,
     },
-    // Class ID - Class reference
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
       required: [true, "Class is required"],
       index: true,
     },
-    // Exam Type - Midterm / Final / Unit Test / Assignment
     examType: {
       type: String,
       enum: {
@@ -43,60 +45,59 @@ const resultSchema = new mongoose.Schema(
       },
       required: [true, "Exam type is required"],
     },
-    // Exam Name - Custom exam name
     examName: {
       type: String,
       trim: true,
       default: null,
     },
-    // Marks Obtained - Numeric marks
     marksObtained: {
       type: Number,
       required: [true, "Marks obtained is required"],
       min: [0, "Marks cannot be negative"],
     },
-    // Maximum Marks - Total marks
     maxMarks: {
       type: Number,
       required: [true, "Maximum marks is required"],
       min: [1, "Maximum marks must be at least 1"],
     },
-    // Grade - Grade representation (A+, A, B+, B, C+, C, D, F)
+    passingMarks: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     grade: {
       type: String,
       enum: ["A+", "A", "B+", "B", "C+", "C", "D", "F", null],
       default: null,
     },
-    // Percentage
     percentage: {
       type: Number,
       min: 0,
       max: 100,
       default: null,
     },
-    // Academic Year
+    isPassed: {
+      type: Boolean,
+      default: null,
+    },
     academicYear: {
       type: String,
       required: [true, "Academic year is required"],
       trim: true,
     },
-    // Remarks
     remarks: {
       type: String,
       trim: true,
       default: null,
     },
-    // Published - Result status
     isPublished: {
       type: Boolean,
       default: false,
     },
-    // Published Date
     publishedAt: {
       type: Date,
       default: null,
     },
-    // Entered By - Teacher who entered the result
     enteredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Teacher",
@@ -104,17 +105,15 @@ const resultSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true, // Adds createdAt
+    timestamps: true,
   },
 );
 
 // Pre-save middleware to calculate percentage and grade
 resultSchema.pre("save", function (next) {
-  // Calculate percentage
   if (this.marksObtained !== undefined && this.maxMarks) {
     this.percentage = (this.marksObtained / this.maxMarks) * 100;
 
-    // Auto-assign grade based on percentage
     if (this.percentage >= 90) this.grade = "A+";
     else if (this.percentage >= 80) this.grade = "A";
     else if (this.percentage >= 70) this.grade = "B+";
@@ -123,13 +122,16 @@ resultSchema.pre("save", function (next) {
     else if (this.percentage >= 40) this.grade = "C";
     else if (this.percentage >= 33) this.grade = "D";
     else this.grade = "F";
+
+    const passing = this.passingMarks || 0;
+    this.isPassed = this.marksObtained >= passing;
   }
   next();
 });
 
 // Compound index for unique result per student per subject per exam
 resultSchema.index(
-  { studentId: 1, subjectId: 1, examType: 1, academicYear: 1 },
+  { studentId: 1, subjectId: 1, examType: 1, academicYear: 1, examId: 1 },
   { unique: true },
 );
 

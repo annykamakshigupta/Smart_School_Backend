@@ -27,11 +27,18 @@ class AssignmentService {
         throw new Error("Subject not found");
       }
 
-      // Validate subject belongs to class when subject.classId is defined
-      if (
-        subjectExists.classId &&
-        subjectExists.classId.toString() !== classExists._id.toString()
-      ) {
+      // Validate subject belongs to class when subject is scoped to specific classes
+      const subjectAllowedClassIds = Array.isArray(subjectExists.classIds)
+        ? subjectExists.classIds.map((id) => id.toString())
+        : [];
+      const legacyAllowed = subjectExists.classId
+        ? [subjectExists.classId.toString()]
+        : [];
+
+      const allowed = [
+        ...new Set([...subjectAllowedClassIds, ...legacyAllowed]),
+      ];
+      if (allowed.length > 0 && !allowed.includes(classExists._id.toString())) {
         throw new Error(
           "Selected subject does not belong to the selected class",
         );

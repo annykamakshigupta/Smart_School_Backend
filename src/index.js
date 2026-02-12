@@ -16,6 +16,7 @@ import feeRoutes from "./routes/fee.routes.js";
 import parentRoutes from "./routes/parent.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import teacherRoutes from "./routes/teacher.routes.js";
+import examRoutes from "./routes/exam.routes.js";
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use("/api/assignments", assignmentRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/results", resultRoutes);
 app.use("/api/fees", feeRoutes);
+app.use("/api/exams", examRoutes);
 
 const PORT = process.env.PORT || 8080;
 

@@ -65,6 +65,7 @@ export const login = async (req, res) => {
       switch (user.role) {
         case "student":
           roleProfile = await Student.findById(user.profileId)
+            .populate("userId", "name email phone status")
             .populate("classId", "name section academicYear")
             .populate({
               path: "parentId",
@@ -155,6 +156,7 @@ export const getCurrentUser = async (req, res) => {
       switch (user.role) {
         case "student":
           roleProfile = await Student.findById(user.profileId)
+            .populate("userId", "name email phone status")
             .populate("classId", "name section academicYear")
             .populate({
               path: "parentId",

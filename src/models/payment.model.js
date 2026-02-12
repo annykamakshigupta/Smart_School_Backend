@@ -83,7 +83,7 @@ paymentSchema.pre("save", function (next) {
   if (!this.receiptNumber) {
     this.receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
   }
-  next();
+
 });
 
 paymentSchema.index({ studentId: 1, createdAt: -1 });

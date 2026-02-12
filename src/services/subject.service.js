@@ -7,6 +7,31 @@ import {
 } from "../utils/profileHelper.js";
 
 class SubjectService {
+  normalizeObjectIdArray(values) {
+    if (!Array.isArray(values)) return undefined;
+    const normalized = values
+      .map((v) => normalizeOptionalObjectId(v))
+      .filter(Boolean)
+      .map((v) => String(v));
+    return [...new Set(normalized)];
+  }
+
+  async validateClassesExist(classIds) {
+    if (!classIds || classIds.length === 0) return;
+    const found = await Class.countDocuments({ _id: { $in: classIds } });
+    if (found !== classIds.length) {
+      throw new Error("One or more classes not found");
+    }
+  }
+
+  getSubjectClassIds(subjectDoc) {
+    const legacy = subjectDoc?.classId ? [String(subjectDoc.classId)] : [];
+    const multi = Array.isArray(subjectDoc?.classIds)
+      ? subjectDoc.classIds.map((id) => String(id))
+      : [];
+    return [...new Set([...legacy, ...multi])];
+  }
+
   // Create a new subject
   async createSubject(subjectData) {
     try {
@@ -20,12 +45,18 @@ class SubjectService {
       // Normalize optional ObjectId inputs (avoid "Cast to ObjectId failed" when UI sends "")
       data.assignedTeacher = normalizeOptionalObjectId(data.assignedTeacher);
       data.classId = normalizeOptionalObjectId(data.classId);
+      const normalizedClassIds = this.normalizeObjectIdArray(data.classIds);
 
       if (data.assignedTeacher === undefined) {
         delete data.assignedTeacher;
       }
       if (data.classId === undefined) {
         delete data.classId;
+      }
+      if (normalizedClassIds === undefined) {
+        delete data.classIds;
+      } else {
+        data.classIds = normalizedClassIds;
       }
 
       // Check if subject code already exists (check both active and inactive)
@@ -46,20 +77,34 @@ class SubjectService {
       }
 
       // Validate class if provided
-      if (data.classId) {
-        const classExists = await Class.findById(data.classId);
-        if (!classExists) {
-          throw new Error("Class not found");
-        }
+      // If classIds are provided, prefer them. Otherwise fall back to legacy classId.
+      let classIdsToLink = [];
+      if (Array.isArray(data.classIds) && data.classIds.length > 0) {
+        classIdsToLink = data.classIds;
+      } else if (data.classId) {
+        classIdsToLink = [String(data.classId)];
+        data.classIds = classIdsToLink;
+      }
+
+      await this.validateClassesExist(classIdsToLink);
+
+      // Maintain legacy classId for backward compatibility:
+      // - if exactly 1 class, set classId
+      // - if multiple classes, set classId to null
+      if (classIdsToLink.length === 1) {
+        data.classId = classIdsToLink[0];
+      } else if (classIdsToLink.length > 1) {
+        data.classId = null;
       }
 
       const newSubject = await Subject.create(data);
 
-      // If classId is provided, add this subject to the class
-      if (data.classId) {
-        await Class.findByIdAndUpdate(data.classId, {
-          $addToSet: { subjects: newSubject._id },
-        });
+      // If classIds are provided, add this subject to all those classes
+      if (classIdsToLink.length > 0) {
+        await Class.updateMany(
+          { _id: { $in: classIdsToLink } },
+          { $addToSet: { subjects: newSubject._id } },
+        );
       }
 
       return await Subject.findById(newSubject._id)
@@ -71,7 +116,8 @@ class SubjectService {
             select: "name email phone",
           },
         })
-        .populate("classId", "name section");
+        .populate("classId", "name section")
+        .populate("classIds", "name section");
     } catch (error) {
       throw error;
     }
@@ -95,7 +141,10 @@ class SubjectService {
       }
 
       if (filters.classId) {
-        query.classId = filters.classId;
+        query.$or = [
+          { classId: filters.classId },
+          { classIds: filters.classId },
+        ];
       }
 
       if (filters.teacherId) {
@@ -118,6 +167,7 @@ class SubjectService {
           },
         })
         .populate("classId", "name section")
+        .populate("classIds", "name section")
         .sort({ name: 1 });
 
       return subjects;
@@ -138,7 +188,8 @@ class SubjectService {
             select: "name email phone",
           },
         })
-        .populate("classId", "name section academicYear");
+        .populate("classId", "name section academicYear")
+        .populate("classIds", "name section academicYear");
 
       if (!subject) {
         throw new Error("Subject not found");
@@ -157,12 +208,18 @@ class SubjectService {
 
       data.assignedTeacher = normalizeOptionalObjectId(data.assignedTeacher);
       data.classId = normalizeOptionalObjectId(data.classId);
+      const normalizedClassIds = this.normalizeObjectIdArray(data.classIds);
 
       if (data.assignedTeacher === undefined) {
         delete data.assignedTeacher;
       }
       if (data.classId === undefined) {
         delete data.classId;
+      }
+      if (normalizedClassIds === undefined) {
+        delete data.classIds;
+      } else {
+        data.classIds = normalizedClassIds;
       }
 
       // Validate teacher if being updated
@@ -175,12 +232,54 @@ class SubjectService {
         data.assignedTeacher = teacher._id;
       }
 
-      // Validate class if being updated
-      if (data.classId) {
-        const classExists = await Class.findById(data.classId);
-        if (!classExists) {
-          throw new Error("Class not found");
+      const currentSubject = await Subject.findById(subjectId);
+      if (!currentSubject) {
+        throw new Error("Subject not found");
+      }
+
+      const classIdsExplicitlyProvided =
+        Object.prototype.hasOwnProperty.call(updateData, "classIds") ||
+        Object.prototype.hasOwnProperty.call(updateData, "classId");
+
+      let nextClassIds;
+      if (classIdsExplicitlyProvided) {
+        if (Array.isArray(updateData.classIds)) {
+          nextClassIds = normalizedClassIds || [];
+        } else if (updateData.classId === null) {
+          nextClassIds = [];
+        } else if (data.classId) {
+          nextClassIds = [String(data.classId)];
+        } else {
+          nextClassIds = [];
         }
+
+        await this.validateClassesExist(nextClassIds);
+
+        const currentClassIds = this.getSubjectClassIds(currentSubject);
+
+        const toRemove = currentClassIds.filter(
+          (id) => !nextClassIds.includes(id),
+        );
+        const toAdd = nextClassIds.filter(
+          (id) => !currentClassIds.includes(id),
+        );
+
+        if (toRemove.length > 0) {
+          await Class.updateMany(
+            { _id: { $in: toRemove } },
+            { $pull: { subjects: subjectId } },
+          );
+        }
+
+        if (toAdd.length > 0) {
+          await Class.updateMany(
+            { _id: { $in: toAdd } },
+            { $addToSet: { subjects: subjectId } },
+          );
+        }
+
+        data.classIds = nextClassIds;
+        data.classId = nextClassIds.length === 1 ? nextClassIds[0] : null;
       }
 
       // Normalize and check for duplicate code if being updated
@@ -197,26 +296,6 @@ class SubjectService {
         }
       }
 
-      const currentSubject = await Subject.findById(subjectId);
-      if (!currentSubject) {
-        throw new Error("Subject not found");
-      }
-
-      // If classId is changing, update both old and new classes
-      if (data.classId && data.classId !== currentSubject.classId?.toString()) {
-        // Remove from old class
-        if (currentSubject.classId) {
-          await Class.findByIdAndUpdate(currentSubject.classId, {
-            $pull: { subjects: subjectId },
-          });
-        }
-
-        // Add to new class
-        await Class.findByIdAndUpdate(data.classId, {
-          $addToSet: { subjects: subjectId },
-        });
-      }
-
       const updatedSubject = await Subject.findByIdAndUpdate(subjectId, data, {
         new: true,
         runValidators: true,
@@ -229,7 +308,8 @@ class SubjectService {
             select: "name email phone",
           },
         })
-        .populate("classId", "name section");
+        .populate("classId", "name section")
+        .populate("classIds", "name section");
 
       return updatedSubject;
     } catch (error) {
@@ -246,11 +326,13 @@ class SubjectService {
         throw new Error("Subject not found");
       }
 
-      // Remove subject from class
-      if (subject.classId) {
-        await Class.findByIdAndUpdate(subject.classId, {
-          $pull: { subjects: subjectId },
-        });
+      // Remove subject from all linked classes
+      const classIds = this.getSubjectClassIds(subject);
+      if (classIds.length > 0) {
+        await Class.updateMany(
+          { _id: { $in: classIds } },
+          { $pull: { subjects: subjectId } },
+        );
       }
 
       // 🔥 Permanently delete

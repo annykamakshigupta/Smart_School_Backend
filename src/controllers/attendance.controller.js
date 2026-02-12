@@ -200,6 +200,20 @@ export const getStudentsForAttendance = async (req, res) => {
       });
     }
 
+    if (!mongoose.isValidObjectId(classId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid classId",
+      });
+    }
+
+    if (subjectId && !mongoose.isValidObjectId(subjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subjectId",
+      });
+    }
+
     const classDoc = await Class.findById(classId).select("_id classTeacher");
     if (!classDoc) {
       return res.status(404).json({
@@ -217,11 +231,50 @@ export const getStudentsForAttendance = async (req, res) => {
         });
       }
 
-      const teacherId = String(user.profileId);
-      const isClassTeacher =
-        classDoc.classTeacher && String(classDoc.classTeacher) === teacherId;
+      const teacherRecord = await Teacher.findById(user.profileId)
+        .select("_id userId assignedClasses assignedSubjects")
+        .lean();
 
-      if (!isClassTeacher) {
+      if (!teacherRecord) {
+        return res.status(403).json({
+          success: false,
+          message: "Teacher profile not found",
+        });
+      }
+
+      const teacherProfileId = String(teacherRecord._id);
+      const teacherUserId = teacherRecord.userId
+        ? String(teacherRecord.userId)
+        : null;
+
+      // Tolerate legacy data where classTeacher might mistakenly store a userId.
+      const classTeacherValue = classDoc.classTeacher
+        ? String(classDoc.classTeacher)
+        : null;
+      const isClassTeacher =
+        !!classTeacherValue &&
+        (classTeacherValue === teacherProfileId ||
+          (teacherUserId && classTeacherValue === teacherUserId));
+
+      const isAssignedClass = Array.isArray(teacherRecord.assignedClasses)
+        ? teacherRecord.assignedClasses.some(
+            (c) => String(c) === String(classId),
+          )
+        : false;
+
+      const isAssignedSubject = subjectId
+        ? Array.isArray(teacherRecord.assignedSubjects)
+          ? teacherRecord.assignedSubjects.some(
+              (s) => String(s) === String(subjectId),
+            )
+          : false
+        : true;
+
+      // Allow access if teacher is class teacher OR explicitly assigned to the class
+      // (and subject when subjectId is provided).
+      const canAccessByManualAssignment = isAssignedClass && isAssignedSubject;
+
+      if (!isClassTeacher && !canAccessByManualAssignment) {
         const scheduleQuery = {
           classId,
           teacherId: user.profileId,
@@ -241,9 +294,15 @@ export const getStudentsForAttendance = async (req, res) => {
       }
     }
 
+    // Be tolerant of legacy data where enrollmentStatus may be missing or stored with different casing.
     const students = await Student.find({
       classId,
-      enrollmentStatus: "active",
+      $or: [
+        { enrollmentStatus: "active" },
+        { enrollmentStatus: { $exists: false } },
+        { enrollmentStatus: null },
+        { enrollmentStatus: { $regex: /^active$/i } },
+      ],
     })
       .populate("userId", "name email phone")
       .sort({ rollNumber: 1 });
@@ -254,6 +313,20 @@ export const getStudentsForAttendance = async (req, res) => {
       data: students,
     });
   } catch (error) {
+    // Helpful diagnostics for common runtime issues (e.g., CastError)
+    console.error("getStudentsForAttendance error:", {
+      name: error?.name,
+      message: error?.message,
+    });
+
+    if (error?.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid id format",
+        error: error.message,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Error fetching students",
@@ -766,7 +839,12 @@ export const getAttendanceStats = async (req, res) => {
     // Get total students in class
     const totalStudents = await Student.countDocuments({
       classId,
-      enrollmentStatus: "active",
+      $or: [
+        { enrollmentStatus: "active" },
+        { enrollmentStatus: { $exists: false } },
+        { enrollmentStatus: null },
+        { enrollmentStatus: { $regex: /^active$/i } },
+      ],
     });
 
     // Format stats

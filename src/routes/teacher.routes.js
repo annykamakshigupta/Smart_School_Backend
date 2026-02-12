@@ -13,4 +13,11 @@ router.get(
   teacherController.getMyAssignments,
 );
 
+// Teacher-only: students by class (authorized)
+router.get(
+  "/class/:classId/students",
+  authorize(["teacher"]),
+  teacherController.getStudentsByClass,
+);
+
 export default router;

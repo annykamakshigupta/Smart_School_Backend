@@ -32,6 +32,12 @@ const subjectSchema = new mongoose.Schema(
       ref: "Class",
       default: null,
     },
+    // Classes - Associated classes (multi-class support)
+    classIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: "Class",
+      default: [],
+    },
     // Academic Year - Academic session
     academicYear: {
       type: String,
@@ -63,6 +69,7 @@ const subjectSchema = new mongoose.Schema(
 
 // Index for faster queries
 subjectSchema.index({ classId: 1, academicYear: 1 });
+subjectSchema.index({ classIds: 1, academicYear: 1 });
 subjectSchema.index({ assignedTeacher: 1 });
 
 const Subject = mongoose.model("Subject", subjectSchema);
