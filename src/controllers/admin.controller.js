@@ -1415,10 +1415,48 @@ class AdminController {
         });
       }
 
-      // Get classes where this teacher is class teacher
-      const classTeacherOf = await Class.find({
-        classTeacher: teacherId,
-      }).select("name section academicYear");
+      // Get classes where this teacher is class teacher (tolerate legacy data)
+      const classTeacherOr = [
+        teacher?._id ? { classTeacher: teacher._id } : null,
+        teacher?.userId?._id ? { classTeacher: teacher.userId._id } : null,
+      ].filter(Boolean);
+
+      const classTeacherOf = classTeacherOr.length
+        ? await Class.find({ $or: classTeacherOr }).select(
+            "name section academicYear",
+          )
+        : [];
+
+      // Source of truth for subject-teacher assignment is Subject.assignedTeacher.
+      // This makes the UI correct even if assignments were created via /subjects/:id/assign-teacher
+      // (which may not always keep Teacher.assignedSubjects in sync).
+      const subjectsByAssignedTeacher = await Subject.find({
+        assignedTeacher: teacher._id,
+      })
+        .populate("classId", "name section academicYear")
+        .populate("classIds", "name section academicYear")
+        .lean();
+
+      // Merge teacher.assignedSubjects (if present) with subjectsByAssignedTeacher
+      const mergedSubjectsMap = new Map();
+      (Array.isArray(teacher.assignedSubjects)
+        ? teacher.assignedSubjects
+        : []
+      ).forEach((s) => {
+        const id = s?._id ? String(s._id) : String(s);
+        if (!id) return;
+        mergedSubjectsMap.set(id, s);
+      });
+      (Array.isArray(subjectsByAssignedTeacher)
+        ? subjectsByAssignedTeacher
+        : []
+      ).forEach((s) => {
+        const id = s?._id ? String(s._id) : String(s);
+        if (!id) return;
+        mergedSubjectsMap.set(id, s);
+      });
+
+      const resolvedAssignedSubjects = Array.from(mergedSubjectsMap.values());
 
       // Get student count for assigned classes
       let totalStudents = 0;
@@ -1439,7 +1477,7 @@ class AdminController {
             employeeCode: teacher.employeeCode,
           },
           assignedClasses: teacher.assignedClasses,
-          assignedSubjects: teacher.assignedSubjects,
+          assignedSubjects: resolvedAssignedSubjects,
           classTeacherOf,
           totalStudents,
         },

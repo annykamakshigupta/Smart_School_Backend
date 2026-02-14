@@ -252,10 +252,24 @@ export const getClassAnalytics = async (req, res) => {
       req.params.examId,
       req.params.classId,
     );
-    if (!data)
-      return res
-        .status(404)
-        .json({ success: false, message: "No results found" });
+    if (!data) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          overview: {
+            totalStudents: 0,
+            overallAverage: "0",
+            highestPercentage: "0",
+            lowestPercentage: "0",
+            passCount: 0,
+            failCount: 0,
+          },
+          subjectAnalytics: [],
+          studentRanking: [],
+        },
+        message: "No results found for this exam and class yet",
+      });
+    }
     res.status(200).json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

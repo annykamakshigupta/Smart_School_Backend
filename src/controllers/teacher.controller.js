@@ -23,7 +23,7 @@ class TeacherController {
       const teacher = await Teacher.findById(teacherProfileId)
         .populate("userId", "name email phone")
         .populate("assignedClasses", "name section academicYear")
-        .populate("assignedSubjects", "name classId");
+        .populate("assignedSubjects", "name classId classIds");
 
       if (!teacher) {
         return res.status(404).json({

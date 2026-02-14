@@ -66,11 +66,44 @@ export const login = async (req, res) => {
         case "student":
           roleProfile = await Student.findById(user.profileId)
             .populate("userId", "name email phone status")
-            .populate("classId", "name section academicYear")
+            .populate({
+              path: "classId",
+              select: "name section academicYear classTeacher roomNumber",
+              populate: {
+                path: "classTeacher",
+                populate: { path: "userId", select: "name email phone" },
+              },
+            })
             .populate({
               path: "parentId",
               populate: { path: "userId", select: "name email phone" },
             });
+
+          // Tolerate legacy data where classTeacher might mistakenly store a userId.
+          try {
+            const cls = roleProfile?.classId;
+            const ct = cls?.classTeacher;
+            const hasTeacherDetails =
+              !!ct &&
+              typeof ct === "object" &&
+              (ct.userId?.name || ct.userId?.email || ct.userId?.phone);
+
+            if (cls && ct && !hasTeacherDetails) {
+              const resolvedTeacher =
+                (await Teacher.findById(ct)
+                  .populate("userId", "name email phone")
+                  .lean()) ||
+                (await Teacher.findOne({ userId: ct })
+                  .populate("userId", "name email phone")
+                  .lean());
+
+              if (resolvedTeacher) {
+                roleProfile.classId.classTeacher = resolvedTeacher;
+              }
+            }
+          } catch {
+            // Ignore; not critical for login
+          }
           break;
         case "parent":
           roleProfile = await Parent.findById(user.profileId).populate({
@@ -157,11 +190,44 @@ export const getCurrentUser = async (req, res) => {
         case "student":
           roleProfile = await Student.findById(user.profileId)
             .populate("userId", "name email phone status")
-            .populate("classId", "name section academicYear")
+            .populate({
+              path: "classId",
+              select: "name section academicYear classTeacher roomNumber",
+              populate: {
+                path: "classTeacher",
+                populate: { path: "userId", select: "name email phone" },
+              },
+            })
             .populate({
               path: "parentId",
               populate: { path: "userId", select: "name email phone" },
             });
+
+          // Tolerate legacy data where classTeacher might mistakenly store a userId.
+          try {
+            const cls = roleProfile?.classId;
+            const ct = cls?.classTeacher;
+            const hasTeacherDetails =
+              !!ct &&
+              typeof ct === "object" &&
+              (ct.userId?.name || ct.userId?.email || ct.userId?.phone);
+
+            if (cls && ct && !hasTeacherDetails) {
+              const resolvedTeacher =
+                (await Teacher.findById(ct)
+                  .populate("userId", "name email phone")
+                  .lean()) ||
+                (await Teacher.findOne({ userId: ct })
+                  .populate("userId", "name email phone")
+                  .lean());
+
+              if (resolvedTeacher) {
+                roleProfile.classId.classTeacher = resolvedTeacher;
+              }
+            }
+          } catch {
+            // Ignore; fallback best-effort
+          }
           break;
         case "parent":
           roleProfile = await Parent.findById(user.profileId).populate({
