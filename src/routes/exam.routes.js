@@ -22,6 +22,9 @@ import {
   getChildExamResults,
   getReportCard,
   getTeacherExams,
+  getAdminOverview,
+  getStudentPublishedExams,
+  getChildPublishedExams,
 } from "../controllers/exam.controller.js";
 
 const router = express.Router();
@@ -31,7 +34,40 @@ router.use(authenticate);
 // ===== EXAM CRUD (Admin) =====
 router.post("/", authorize(["admin"]), createExam);
 router.get("/", authorize(["admin", "teacher"]), getAllExams);
+router.get("/admin/overview", authorize(["admin"]), getAdminOverview);
 router.get("/teacher/my-exams", authorize(["teacher"]), getTeacherExams);
+
+// ===== STUDENT =====
+router.get("/student/my-results", authorize(["student"]), getMyExamResults);
+router.get(
+  "/student/published-exams",
+  authorize(["student"]),
+  getStudentPublishedExams,
+);
+
+// ===== PARENT =====
+router.get(
+  "/parent/child/:studentId",
+  authorize(["parent"]),
+  getChildExamResults,
+);
+router.get(
+  "/parent/child/:studentId/exams",
+  authorize(["parent"]),
+  getChildPublishedExams,
+);
+
+// ===== APPROVAL (Admin) =====
+router.get("/approval/queue", authorize(["admin"]), getApprovalQueue);
+
+// ===== REPORT CARD =====
+router.get(
+  "/report-card/:studentId",
+  authorize(["admin", "teacher", "student", "parent"]),
+  getReportCard,
+);
+
+// ===== EXAM by ID =====
 router.get("/:id", authorize(["admin", "teacher"]), getExamById);
 router.put("/:id", authorize(["admin"]), updateExam);
 router.delete("/:id", authorize(["admin"]), deleteExam);
@@ -53,8 +89,7 @@ router.post(
   submitMarks,
 );
 
-// ===== APPROVAL (Admin) =====
-router.get("/approval/queue", authorize(["admin"]), getApprovalQueue);
+// ===== APPROVAL ACTIONS (Admin) =====
 router.post(
   "/marks/:examSubjectId/approve",
   authorize(["admin"]),
@@ -72,23 +107,6 @@ router.get(
   "/:examId/analytics/:classId",
   authorize(["admin", "teacher"]),
   getClassAnalytics,
-);
-
-// ===== STUDENT =====
-router.get("/student/my-results", authorize(["student"]), getMyExamResults);
-
-// ===== PARENT =====
-router.get(
-  "/parent/child/:studentId",
-  authorize(["parent"]),
-  getChildExamResults,
-);
-
-// ===== REPORT CARD =====
-router.get(
-  "/report-card/:studentId",
-  authorize(["admin", "teacher", "student", "parent"]),
-  getReportCard,
 );
 
 export default router;

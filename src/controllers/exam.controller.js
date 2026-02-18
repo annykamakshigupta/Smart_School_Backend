@@ -398,3 +398,52 @@ export const getTeacherExams = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ============ ADMIN OVERVIEW ============
+
+export const getAdminOverview = async (req, res) => {
+  try {
+    const data = await examResultService.getAdminOverview();
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ STUDENT PUBLISHED EXAMS ============
+
+export const getStudentPublishedExams = async (req, res) => {
+  try {
+    if (!req.user.profileId) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Student profile not found" });
+    }
+    const data = await examResultService.getStudentPublishedExams(
+      req.user.profileId,
+    );
+    res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ PARENT: CHILD PUBLISHED EXAMS ============
+
+export const getChildPublishedExams = async (req, res) => {
+  try {
+    const parent = await Parent.findById(req.user.profileId);
+    if (
+      !parent ||
+      !parent.children.some((c) => c.toString() === req.params.studentId)
+    ) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    const data = await examResultService.getStudentPublishedExams(
+      req.params.studentId,
+    );
+    res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

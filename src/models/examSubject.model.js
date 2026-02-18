@@ -33,7 +33,7 @@ const examSubjectSchema = new mongoose.Schema(
     },
     marksEntryStatus: {
       type: String,
-      enum: ["pending", "draft", "submitted", "approved"],
+      enum: ["pending", "draft", "submitted", "approved", "rejected"],
       default: "pending",
     },
     submittedBy: {

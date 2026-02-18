@@ -34,6 +34,14 @@ class ExamResultService {
   }
 
   async updateExam(id, data) {
+    const existing = await Exam.findById(id).select("isPublished");
+    if (!existing) throw new Error("Exam not found");
+    if (existing.isPublished) {
+      throw new Error(
+        "Exam is published. Results are locked and cannot be edited",
+      );
+    }
+
     const exam = await Exam.findByIdAndUpdate(id, data, { new: true })
       .populate("classes", "name section academicYear")
       .populate("createdBy", "name");
@@ -41,12 +49,24 @@ class ExamResultService {
   }
 
   async deleteExam(id) {
+    const existing = await Exam.findById(id).select("isPublished");
+    if (!existing) throw new Error("Exam not found");
+    if (existing.isPublished) {
+      throw new Error(
+        "Exam is published. Results are locked and cannot be deleted",
+      );
+    }
     await ExamSubject.deleteMany({ examId: id });
     await Result.deleteMany({ examId: id });
     return Exam.findByIdAndDelete(id);
   }
 
   async addExamSubjects(examId, subjects) {
+    const exam = await Exam.findById(examId).select("isPublished");
+    if (!exam) throw new Error("Exam not found");
+    if (exam.isPublished) {
+      throw new Error("Exam is published. Subjects cannot be modified");
+    }
     const created = [];
     for (const sub of subjects) {
       const es = await ExamSubject.create({ examId, ...sub });
@@ -101,6 +121,16 @@ class ExamResultService {
     const examSubject = await ExamSubject.findById(examSubjectId);
     if (!examSubject) throw new Error("Exam subject not found");
 
+    const exam = await Exam.findById(examId).select(
+      "_id name examType academicYear isPublished",
+    );
+    if (!exam) throw new Error("Exam not found");
+    if (exam.isPublished) {
+      throw new Error(
+        "Exam is published. Results are locked and cannot be edited",
+      );
+    }
+
     // If a teacher is submitting, ensure they are assigned to this class+subject
     if (teacherId) {
       const schedule = await Schedule.findOne({
@@ -119,6 +149,11 @@ class ExamResultService {
 
     if (examSubject.marksEntryStatus === "approved") {
       throw new Error("Marks already approved, cannot modify");
+    }
+    if (examSubject.marksEntryStatus === "submitted") {
+      throw new Error(
+        "Marks already submitted. Wait for admin approval/rejection",
+      );
     }
 
     const results = [];
@@ -143,9 +178,11 @@ class ExamResultService {
           }
           result.marksObtained = m.marksObtained;
           result.remarks = m.remarks || result.remarks;
+          // Any edit after a previous submission/approval should reset workflow flags.
+          result.isSubmitted = false;
+          result.isApproved = false;
           await result.save();
         } else {
-          const exam = await Exam.findById(examId);
           result = await Result.create({
             examId,
             studentId: m.studentId,
@@ -159,6 +196,8 @@ class ExamResultService {
             academicYear: exam.academicYear,
             enteredBy: teacherId,
             remarks: m.remarks || null,
+            isSubmitted: false,
+            isApproved: false,
           });
         }
         results.push(result);
@@ -178,6 +217,19 @@ class ExamResultService {
     const es = await ExamSubject.findById(examSubjectId);
     if (!es) throw new Error("Exam subject not found");
 
+    const exam = await Exam.findById(es.examId).select("isPublished");
+    if (!exam) throw new Error("Exam not found");
+    if (exam.isPublished) {
+      throw new Error("Exam is published. Results are locked");
+    }
+
+    if (es.marksEntryStatus === "approved") {
+      throw new Error("Marks already approved");
+    }
+    if (es.marksEntryStatus === "submitted") {
+      throw new Error("Marks already submitted");
+    }
+
     if (teacherId) {
       const schedule = await Schedule.findOne({
         teacherId,
@@ -193,6 +245,27 @@ class ExamResultService {
       }
     }
 
+    // Ensure marks exist before allowing submission.
+    const marksCount = await Result.countDocuments({
+      examId: es.examId,
+      classId: es.classId,
+      subjectId: es.subjectId,
+    });
+    if (!marksCount) {
+      throw new Error(
+        "No marks found for this subject. Save marks before submitting for approval",
+      );
+    }
+
+    await Result.updateMany(
+      {
+        examId: es.examId,
+        classId: es.classId,
+        subjectId: es.subjectId,
+      },
+      { $set: { isSubmitted: true, isApproved: false } },
+    );
+
     es.marksEntryStatus = "submitted";
     es.submittedBy = teacherId;
     es.submittedAt = new Date();
@@ -206,6 +279,27 @@ class ExamResultService {
     if (es.marksEntryStatus !== "submitted") {
       throw new Error("Marks must be submitted before approval");
     }
+
+    const marksCount = await Result.countDocuments({
+      examId: es.examId,
+      classId: es.classId,
+      subjectId: es.subjectId,
+    });
+    if (!marksCount) {
+      throw new Error(
+        "No marks found for this subject. Teacher must enter marks before approval",
+      );
+    }
+
+    await Result.updateMany(
+      {
+        examId: es.examId,
+        classId: es.classId,
+        subjectId: es.subjectId,
+      },
+      { $set: { isApproved: true } },
+    );
+
     es.marksEntryStatus = "approved";
     es.approvedBy = adminUserId;
     es.approvedAt = new Date();
@@ -216,21 +310,71 @@ class ExamResultService {
   async rejectMarks(examSubjectId) {
     const es = await ExamSubject.findById(examSubjectId);
     if (!es) throw new Error("Exam subject not found");
-    es.marksEntryStatus = "draft";
+    if (es.marksEntryStatus !== "submitted") {
+      throw new Error("Only submitted marks can be rejected");
+    }
+    es.marksEntryStatus = "rejected";
     es.approvedBy = null;
     es.approvedAt = null;
     await es.save();
+
+    await Result.updateMany(
+      {
+        examId: es.examId,
+        classId: es.classId,
+        subjectId: es.subjectId,
+      },
+      { $set: { isSubmitted: false, isApproved: false } },
+    );
+
     return es;
   }
 
   async publishExamResults(examId, classId) {
-    const query = { examId };
-    if (classId) query.classId = classId;
+    if (!classId) {
+      throw new Error("classId is required to publish results");
+    }
+
+    // Must have all subjects approved for this class before publishing.
+    const notApproved = await ExamSubject.find({
+      examId,
+      classId,
+      marksEntryStatus: { $ne: "approved" },
+    })
+      .populate("subjectId", "name code")
+      .lean();
+
+    if (notApproved.length) {
+      const preview = notApproved
+        .slice(0, 5)
+        .map((x) => x.subjectId?.name || "Unknown")
+        .join(", ");
+      throw new Error(
+        `Cannot publish. ${notApproved.length} subject(s) are not approved yet. ${preview}${notApproved.length > 5 ? "..." : ""}`,
+      );
+    }
+
+    const approvedCount = await Result.countDocuments({
+      examId,
+      classId,
+      isApproved: true,
+    });
+    if (!approvedCount) {
+      throw new Error("No approved results found to publish for this class");
+    }
+
     const now = new Date();
-    const result = await Result.updateMany(query, {
+    const result = await Result.updateMany(
+      { examId, classId, isApproved: true },
+      { isPublished: true, publishedAt: now },
+    );
+
+    // Mark exam as published if at least one class published.
+    await Exam.findByIdAndUpdate(examId, {
       isPublished: true,
       publishedAt: now,
     });
+
     return result;
   }
 
@@ -241,6 +385,19 @@ class ExamResultService {
       isPublished: false,
       publishedAt: null,
     });
+
+    // If no published results remain for this exam, reset flag.
+    const remaining = await Result.countDocuments({
+      examId,
+      isPublished: true,
+    });
+    if (!remaining) {
+      await Exam.findByIdAndUpdate(examId, {
+        isPublished: false,
+        publishedAt: null,
+      });
+    }
+
     return result;
   }
 
@@ -394,6 +551,12 @@ class ExamResultService {
     const overallPercentage = (totalMarks / totalMaxMarks) * 100;
     const allPassed = results.every((r) => r.isPassed);
 
+    const totalGradePoints = results.reduce(
+      (s, r) => s + (typeof r.gradePoint === "number" ? r.gradePoint : 0),
+      0,
+    );
+    const gpa = results.length ? totalGradePoints / results.length : null;
+
     return {
       student,
       results,
@@ -402,12 +565,53 @@ class ExamResultService {
         totalMaxMarks,
         overallPercentage: overallPercentage.toFixed(2),
         overallGrade: getGrade(overallPercentage),
+        gpa: gpa != null ? gpa.toFixed(2) : null,
         totalSubjects: results.length,
         passedSubjects: results.filter((r) => r.isPassed).length,
         failedSubjects: results.filter((r) => !r.isPassed).length,
         result: allPassed ? "PASS" : "FAIL",
       },
     };
+  }
+
+  // ===== DASHBOARDS =====
+
+  async getAdminOverview() {
+    const [totalExams, publishedExams] = await Promise.all([
+      Exam.countDocuments({}),
+      Exam.countDocuments({ isPublished: true }),
+    ]);
+
+    const [pendingApproval, draftExamSubjects] = await Promise.all([
+      ExamSubject.countDocuments({ marksEntryStatus: "submitted" }),
+      ExamSubject.countDocuments({
+        marksEntryStatus: { $in: ["pending", "draft", "rejected"] },
+      }),
+    ]);
+
+    return {
+      totalExams,
+      draftExamSubjects,
+      pendingApproval,
+      publishedExams,
+    };
+  }
+
+  async getStudentPublishedExams(studentId) {
+    const examIds = await Result.distinct("examId", {
+      studentId,
+      isPublished: true,
+      examId: { $ne: null },
+    });
+
+    if (!examIds.length) return [];
+
+    return Exam.find({ _id: { $in: examIds } })
+      .select(
+        "name examType academicYear startDate endDate isPublished publishedAt",
+      )
+      .sort({ startDate: -1 })
+      .lean();
   }
 }
 
