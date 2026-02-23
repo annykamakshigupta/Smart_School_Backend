@@ -19,6 +19,7 @@ const feeStructureSchema = new mongoose.Schema(
           "tuition",
           "exam",
           "transport",
+          "fine",
           "library",
           "lab",
           "admission",

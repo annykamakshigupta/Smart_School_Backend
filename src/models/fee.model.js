@@ -21,6 +21,7 @@ const feeSchema = new mongoose.Schema(
           "tuition",
           "exam",
           "transport",
+          "fine",
           "library",
           "lab",
           "admission",
@@ -157,7 +158,6 @@ feeSchema.pre("save", function (next) {
   } else if (new Date() > this.dueDate && this.paymentStatus === "unpaid") {
     this.paymentStatus = "overdue";
   }
-
 });
 
 // Index for efficient querying

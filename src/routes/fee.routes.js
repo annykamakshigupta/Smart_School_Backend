@@ -85,17 +85,17 @@ router.post("/:id/parent-pay", authorize(["parent"]), parentPayment);
 // SHARED ROUTES (ADMIN + PARENT + STUDENT)
 // ═══════════════════════════════════════
 
-// Get fees by student (Admin, Student-own, Parent-children)
+// Get fees by student (Admin, Student-own, Parent-children, Teacher-readonly)
 router.get(
   "/student/:studentId",
-  authorize(["admin", "parent", "student"]),
+  authorize(["admin", "parent", "student", "teacher"]),
   getFeesByStudent,
 );
 
 // Payment history
 router.get(
   "/payments/:studentId",
-  authorize(["admin", "parent", "student"]),
+  authorize(["admin", "parent", "student", "teacher"]),
   getPaymentHistory,
 );
 
