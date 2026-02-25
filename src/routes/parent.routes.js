@@ -8,6 +8,7 @@ const router = express.Router();
 router.use(authenticate);
 router.use(authorize(["parent"]));
 
+router.get("/me", parentController.getMe);
 router.get("/me/children", parentController.getMyChildren);
 
 export default router;

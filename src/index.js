@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -18,8 +18,7 @@ import uploadRoutes from "./routes/upload.routes.js";
 import teacherRoutes from "./routes/teacher.routes.js";
 import examRoutes from "./routes/exam.routes.js";
 import calendarRoutes from "./routes/calendar.routes.js";
-
-dotenv.config();
+import analyticsRoutes from "./routes/analytics.routes.js";
 
 const app = express();
 
@@ -57,6 +56,7 @@ app.use("/api/results", resultRoutes);
 app.use("/api/fees", feeRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/calendar", calendarRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 const PORT = process.env.PORT || 8080;
 
