@@ -23,6 +23,11 @@ function getGroqClient() {
 
 const MODEL = "qwen/qwen3-32b";
 
+function cleanModelText(text) {
+  const raw = String(text || "");
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
 /**
  * Send a prompt to Groq and return parsed JSON insights.
  * Falls back to raw text if JSON parsing fails.
@@ -42,7 +47,7 @@ async function askGroq(systemPrompt, userPrompt, temperature = 0.7) {
   const raw = response.choices?.[0]?.message?.content || "";
 
   // Strip <think>...</think> blocks the model sometimes wraps reasoning in
-  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const cleaned = cleanModelText(raw);
 
   // Try to extract JSON from the response
   try {
@@ -58,6 +63,35 @@ async function askGroq(systemPrompt, userPrompt, temperature = 0.7) {
     // Return structured fallback with text
     return { rawText: cleaned };
   }
+}
+
+/**
+ * Chat assistant (text) — accepts a system prompt + message history
+ * messages: [{role: 'user'|'assistant', content: string}, ...]
+ */
+export async function chatAssistant({
+  systemPrompt,
+  messages,
+  temperature = 0.4,
+  maxTokens = 1200,
+}) {
+  const groq = getGroqClient();
+
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const response = await groq.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...safeMessages.map((m) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: String(m.content || "").slice(0, 4000),
+      })),
+    ],
+    temperature,
+    max_tokens: maxTokens,
+  });
+
+  return cleanModelText(response.choices?.[0]?.message?.content || "");
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -149,4 +183,5 @@ export default {
   getTeacherInsights,
   getStudentInsights,
   getParentInsights,
+  chatAssistant,
 };

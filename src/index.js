@@ -19,6 +19,7 @@ import teacherRoutes from "./routes/teacher.routes.js";
 import examRoutes from "./routes/exam.routes.js";
 import calendarRoutes from "./routes/calendar.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use("/api/fees", feeRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/calendar", calendarRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/ai", aiRoutes);
 
 const PORT = process.env.PORT || 8080;
 

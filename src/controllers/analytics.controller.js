@@ -20,6 +20,25 @@ function currentAcademicYear() {
   return `${y}-${y + 1}`;
 }
 
+function monthKey(date) {
+  try {
+    return new Date(date).toISOString().slice(0, 7); // YYYY-MM
+  } catch {
+    return null;
+  }
+}
+
+function lastNMonths(n = 6) {
+  const now = new Date();
+  const keys = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setMonth(now.getMonth() - i);
+    keys.push(d.toISOString().slice(0, 7));
+  }
+  return keys;
+}
+
 // ────────────── ADMIN ──────────────
 export const getAdminAnalytics = async (req, res) => {
   try {
@@ -138,7 +157,194 @@ export const getAdminAnalytics = async (req, res) => {
     };
 
     const insights = await aiService.getAdminInsights(payload);
-    res.json({ success: true, data: insights });
+
+    // Build a real at-risk students list from DB signals so the UI can
+    // reliably show student names/details (AI summaries may omit identities).
+    const perStudent = new Map();
+    for (const s of students) {
+      perStudent.set(String(s._id), {
+        name: s.userId?.name || "Unknown",
+        class: `${s.classId?.name || ""} ${s.classId?.section || ""}`.trim(),
+        status: s.enrollmentStatus || "—",
+        scoreSum: 0,
+        scoreCount: 0,
+        attMarked: 0,
+        attPresent: 0,
+        overdueFees: 0,
+      });
+    }
+
+    for (const r of results) {
+      const sid = String(r.studentId);
+      const entry = perStudent.get(sid);
+      if (!entry) continue;
+      entry.scoreSum += r.percentage || 0;
+      entry.scoreCount += 1;
+    }
+
+    for (const a of attendances) {
+      const sid = String(a.studentId);
+      const entry = perStudent.get(sid);
+      if (!entry) continue;
+      entry.attMarked += 1;
+      if (a.status === "present" || a.status === "late") entry.attPresent += 1;
+    }
+
+    for (const f of fees) {
+      const sid = String(f.studentId);
+      const entry = perStudent.get(sid);
+      if (!entry) continue;
+      if (f.paymentStatus === "overdue") entry.overdueFees += 1;
+    }
+
+    const atRiskStudentsComputed = Array.from(perStudent.values())
+      .map((s) => {
+        const avgScore = s.scoreCount ? s.scoreSum / s.scoreCount : null;
+        const attendanceRate = s.attMarked
+          ? (s.attPresent / s.attMarked) * 100
+          : null;
+
+        const reasons = [];
+        if (avgScore !== null && avgScore < 50)
+          reasons.push(`Low average score (${Math.round(avgScore)}%)`);
+        if (attendanceRate !== null && attendanceRate < 75)
+          reasons.push(`Low attendance (${Math.round(attendanceRate)}%)`);
+        if (s.overdueFees > 0) reasons.push(`Overdue fees (${s.overdueFees})`);
+
+        let risk = "low";
+        if (
+          (avgScore !== null && avgScore < 40) ||
+          (attendanceRate !== null && attendanceRate < 60) ||
+          s.overdueFees >= 2
+        ) {
+          risk = "high";
+        } else if (
+          (avgScore !== null && avgScore < 50) ||
+          (attendanceRate !== null && attendanceRate < 75) ||
+          s.overdueFees === 1
+        ) {
+          risk = "medium";
+        }
+
+        return {
+          name: s.name,
+          class: s.class,
+          status: s.status,
+          risk,
+          reason: reasons.join(" • ") || "Needs review",
+          avgScore: avgScore !== null ? Math.round(avgScore * 10) / 10 : null,
+          attendanceRate:
+            attendanceRate !== null
+              ? Math.round(attendanceRate * 10) / 10
+              : null,
+          overdueFees: s.overdueFees,
+        };
+      })
+      .filter((s) => s.risk !== "low")
+      .sort((a, b) => {
+        const w = { high: 0, medium: 1, low: 2 };
+        const rw = (w[a.risk] ?? 9) - (w[b.risk] ?? 9);
+        if (rw !== 0) return rw;
+        const as = a.avgScore ?? 999;
+        const bs = b.avgScore ?? 999;
+        if (as !== bs) return as - bs;
+        const aa = a.attendanceRate ?? 999;
+        const ba = b.attendanceRate ?? 999;
+        return aa - ba;
+      })
+      .slice(0, 25);
+
+    const normalizedInsights = {
+      ...(insights || {}),
+      atRiskStudents: atRiskStudentsComputed,
+    };
+
+    // Chart-ready datasets
+    const attDist = (attendances || []).reduce(
+      (acc, a) => {
+        const k = a.status || "unknown";
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      },
+      { present: 0, absent: 0, late: 0, excused: 0 },
+    );
+
+    const feeDist = (fees || []).reduce(
+      (acc, f) => {
+        const k = f.paymentStatus || "unpaid";
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      },
+      { paid: 0, unpaid: 0, partial: 0, overdue: 0 },
+    );
+
+    const months = lastNMonths(6);
+    const resultByMonth = months.map((m) => {
+      const inMonth = (results || []).filter(
+        (r) => monthKey(r.createdAt) === m,
+      );
+      const avg =
+        inMonth.length > 0
+          ? inMonth.reduce((s, r) => s + (r.percentage || 0), 0) /
+            inMonth.length
+          : 0;
+      return {
+        month: m,
+        avgScore: Math.round(avg * 10) / 10,
+        exams: inMonth.length,
+      };
+    });
+
+    const feeByMonth = months.map((m) => {
+      const inMonth = (fees || []).filter((f) => monthKey(f.dueDate) === m);
+      const expected = inMonth.reduce((s, f) => s + (f.totalAmount || 0), 0);
+      const collected = inMonth.reduce((s, f) => s + (f.amountPaid || 0), 0);
+      return {
+        month: m,
+        expected: Math.round(expected * 100) / 100,
+        collected: Math.round(collected * 100) / 100,
+      };
+    });
+
+    const data = {
+      insights: normalizedInsights,
+      stats: {
+        totalStudents,
+        totalClasses,
+        overallAttendanceRate,
+        feeCollectionRate: payload.feeStats.collectionRate,
+      },
+      charts: {
+        attendanceDistribution: Object.entries(attDist).map(
+          ([name, value]) => ({
+            name,
+            value,
+          }),
+        ),
+        feeDistribution: Object.entries(feeDist).map(([name, value]) => ({
+          name,
+          value,
+        })),
+        resultTrend: resultByMonth,
+        feeCollectionTrend: feeByMonth,
+        classComparison: classStats
+          .map((c) => ({
+            className: c.className,
+            avgScore: c.avgScore,
+            avgAttendance: c.avgAttendance,
+          }))
+          .slice(0, 12),
+        subjectPerformance: subjectStats
+          .map((s) => ({
+            subject: s.subject,
+            avgScore: s.avgScore,
+            failRate: s.failRate,
+          }))
+          .slice(0, 12),
+      },
+    };
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Admin analytics error:", error);
     res
@@ -243,7 +449,47 @@ export const getTeacherAnalytics = async (req, res) => {
     };
 
     const insights = await aiService.getTeacherInsights(payload);
-    res.json({ success: true, data: insights });
+
+    // Attendance heatmap data (last ~12 weeks)
+    const daily = new Map();
+    attendances.forEach((a) => {
+      const key = new Date(a.date).toISOString().slice(0, 10);
+      if (!daily.has(key)) daily.set(key, { date: key, total: 0, present: 0 });
+      const d = daily.get(key);
+      d.total++;
+      if (a.status === "present" || a.status === "late") d.present++;
+    });
+    const attendanceHeatmap = Array.from(daily.values())
+      .map((d) => ({
+        date: d.date,
+        value: d.total ? Math.round((d.present / d.total) * 100) : 0,
+        total: d.total,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-84);
+
+    const data = {
+      insights,
+      stats: {
+        classCount: classIds.length,
+        totalStudents: students.length,
+      },
+      charts: {
+        weakStudents: (insights.weakStudents || []).map((s) => ({
+          name: s.name,
+          avgScore: s.avgScore,
+          attendance: s.attendance,
+        })),
+        subjectPerformance: subjectDifficulty.map((s) => ({
+          subject: s.subject,
+          avgScore: s.avgScore,
+          failCount: s.failCount,
+        })),
+        attendanceHeatmap,
+      },
+    };
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Teacher analytics error:", error);
     res
@@ -333,7 +579,55 @@ export const getStudentAnalytics = async (req, res) => {
     };
 
     const insights = await aiService.getStudentInsights(payload);
-    res.json({ success: true, data: insights });
+
+    const months = lastNMonths(6);
+    const resultsByMonth = months.map((m) => {
+      const inMonth = (results || []).filter(
+        (r) => monthKey(r.createdAt) === m,
+      );
+      const avg =
+        inMonth.length > 0
+          ? inMonth.reduce((s, r) => s + (r.percentage || 0), 0) /
+            inMonth.length
+          : 0;
+      return {
+        month: m,
+        avgScore: Math.round(avg * 10) / 10,
+        exams: inMonth.length,
+      };
+    });
+
+    // Attendance trend (by month)
+    const attByMonth = months.map((m) => {
+      const inMonth = (attendances || []).filter((a) => monthKey(a.date) === m);
+      const presentCount = inMonth.filter(
+        (a) => a.status === "present" || a.status === "late",
+      ).length;
+      const rate = inMonth.length
+        ? Math.round((presentCount / inMonth.length) * 100)
+        : 0;
+      return { month: m, attendanceRate: rate, marked: inMonth.length };
+    });
+
+    const data = {
+      insights,
+      stats: {
+        overallAvg: payload.overallAvg,
+        attendanceRate,
+        totalExams: results.length,
+      },
+      charts: {
+        subjectComparison: subjectSummary.map((s) => ({
+          subject: s.subject,
+          avgScore: s.avgScore,
+          latestGrade: s.latestGrade,
+        })),
+        marksProgression: resultsByMonth,
+        attendanceTrend: attByMonth,
+      },
+    };
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Student analytics error:", error);
     res
@@ -450,7 +744,50 @@ export const getParentAnalytics = async (req, res) => {
     };
 
     const insights = await aiService.getParentInsights(payload);
-    res.json({ success: true, data: insights });
+
+    // Trend chart for the first child (if any)
+    const months = lastNMonths(6);
+    const firstChildId = children[0]?._id;
+    const firstChildName = children[0]?.userId?.name;
+    const childTrend = firstChildId
+      ? months.map((m) => {
+          const inMonth = (results || []).filter(
+            (r) =>
+              String(r.studentId) === String(firstChildId) &&
+              monthKey(r.createdAt) === m,
+          );
+          const avg =
+            inMonth.length > 0
+              ? inMonth.reduce((s, r) => s + (r.percentage || 0), 0) /
+                inMonth.length
+              : 0;
+          return {
+            month: m,
+            avgScore: Math.round(avg * 10) / 10,
+            exams: inMonth.length,
+          };
+        })
+      : [];
+
+    const childCompare = childData.map((c) => ({
+      name: c.name,
+      avgScore: c.avgScore,
+      attendanceRate: c.attendanceRate,
+    }));
+
+    const data = {
+      insights,
+      stats: {
+        childrenCount: childData.length,
+      },
+      charts: {
+        childrenComparison: childCompare,
+        firstChildTrend: childTrend,
+        firstChildName: firstChildName || null,
+      },
+    };
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Parent analytics error:", error);
     res
